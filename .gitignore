@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Local build outputs
+cli-dev
+
+# Local editor/workspace files
+.obsidian/
+
+# Local notes / scratch docs
+BLENDER_MCP.md
