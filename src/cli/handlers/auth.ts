@@ -17,6 +17,7 @@ import {
   shouldUseClaudeAIAuth,
   storeOAuthAccountInfo,
 } from '../../services/oauth/client.js'
+import { runCodexOAuthFlow } from '../../services/oauth/codex-client.js'
 import { getOauthProfileFromOauthToken } from '../../services/oauth/getOauthProfile.js'
 import { OAuthService } from '../../services/oauth/index.js'
 import type { OAuthTokens } from '../../services/oauth/types.js'
@@ -135,15 +136,17 @@ export async function authLogin({
   sso,
   console: useConsole,
   claudeai,
+  codex,
 }: {
   email?: string
   sso?: boolean
   console?: boolean
   claudeai?: boolean
+  codex?: boolean
 }): Promise<void> {
-  if (useConsole && claudeai) {
+  if ((useConsole && claudeai) || (codex && (useConsole || claudeai))) {
     process.stderr.write(
-      'Error: --console and --claudeai cannot be used together.\n',
+      'Error: --codex cannot be used together with --console or --claudeai.\n',
     )
     process.exit(1)
   }
@@ -155,6 +158,24 @@ export async function authLogin({
     ? settings.forceLoginMethod === 'claudeai'
     : !useConsole
   const orgUUID = settings.forceLoginOrgUUID
+
+  if (codex) {
+    try {
+      logEvent('tengu_oauth_codex_flow_start', {})
+      const codexTokens = await runCodexOAuthFlow(async url => {
+        process.stdout.write('Opening browser to sign in with OpenAI Codex…\n')
+        process.stdout.write(`If the browser did not open, visit: ${url}\n`)
+      })
+      saveCodexOAuthTokens(codexTokens)
+      await clearAuthRelatedCaches()
+      process.stdout.write('Codex login successful.\n')
+      process.exit(0)
+    } catch (err) {
+      logError(err)
+      process.stderr.write(`Codex login failed: ${errorMessage(err)}\n`)
+      process.exit(1)
+    }
+  }
 
   // Fast path: if a refresh token is provided via env var, skip the browser
   // OAuth flow and exchange it directly for tokens.

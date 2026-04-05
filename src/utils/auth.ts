@@ -1627,12 +1627,17 @@ export function isClaudeAISubscriber(): boolean {
 }
 
 export function isCodexSubscriber(): boolean {
-  // Only treat as Codex subscriber when explicitly using OpenAI provider
+  // Only treat as Codex/OpenAI subscriber when explicitly using OpenAI provider
   if (getAPIProvider() !== 'openai') {
     return false
   }
 
-  // Verify we actually have valid Codex tokens
+  // OPENAI_API_KEY should count as a valid OpenAI auth source for external builds
+  if (process.env.OPENAI_API_KEY) {
+    return true
+  }
+
+  // Otherwise fall back to Codex OAuth tokens
   const tokens = getCodexOAuthTokens()
   return !!tokens?.accessToken
 }

@@ -573,6 +573,29 @@ async function translateCodexStreamToAnthropic(
                 inputTokens = usage.input_tokens || inputTokens
               }
             }
+
+            // OpenAI/Codex error event
+            else if (eventType === 'error') {
+              const error = event.error as Record<string, unknown> | undefined
+              const message = typeof error?.message === 'string'
+                ? error.message
+                : 'Unknown upstream API error'
+              emitTextBlock(controller, encoder, contentBlockIndex, `[Upstream API error] ${message}`)
+              finishStream(controller, encoder, outputTokens, inputTokens, false)
+              return
+            }
+
+            // Explicit failed response event
+            else if (eventType === 'response.failed') {
+              const response = event.response as Record<string, unknown> | undefined
+              const error = response?.error as Record<string, unknown> | undefined
+              const message = typeof error?.message === 'string'
+                ? error.message
+                : 'OpenAI response failed'
+              emitTextBlock(controller, encoder, contentBlockIndex, `[Upstream API failed] ${message}`)
+              finishStream(controller, encoder, outputTokens, inputTokens, false)
+              return
+            }
           }
         }
       } catch (err) {
@@ -737,6 +760,7 @@ async function translateCodexStreamToAnthropic(
 // ── Main fetch interceptor ──────────────────────────────────────────
 
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex/responses'
+const OPENAI_RESPONSES_BASE_URL = 'https://api.openai.com/v1/responses'
 
 /**
  * Creates a fetch function that intercepts Anthropic API calls and routes them to Codex.
@@ -808,5 +832,64 @@ export function createCodexFetch(
 
     // Translate streaming response
     return translateCodexStreamToAnthropic(codexResponse, codexModel)
+  }
+}
+
+/**
+ * Creates a fetch function that intercepts Anthropic API calls and routes them to
+ * the OpenAI Responses API using a standard API key instead of Codex OAuth.
+ */
+export function createOpenAIApiFetch(
+  apiKey: string,
+  baseUrl = OPENAI_RESPONSES_BASE_URL,
+): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = input instanceof Request ? input.url : String(input)
+
+    if (!url.includes('/v1/messages')) {
+      return globalThis.fetch(input, init)
+    }
+
+    let anthropicBody: Record<string, unknown>
+    try {
+      const bodyText =
+        init?.body instanceof ReadableStream
+          ? await new Response(init.body).text()
+          : typeof init?.body === 'string'
+            ? init.body
+            : '{}'
+      anthropicBody = JSON.parse(bodyText)
+    } catch {
+      anthropicBody = {}
+    }
+
+    const { codexBody, codexModel } = translateToCodexBody(anthropicBody)
+
+    const openaiResponse = await globalThis.fetch(baseUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(codexBody),
+    })
+
+    if (!openaiResponse.ok) {
+      const errorText = await openaiResponse.text()
+      const errorBody = {
+        type: 'error',
+        error: {
+          type: 'api_error',
+          message: `OpenAI API error (${openaiResponse.status}): ${errorText}`,
+        },
+      }
+      return new Response(JSON.stringify(errorBody), {
+        status: openaiResponse.status,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    return translateCodexStreamToAnthropic(openaiResponse, codexModel)
   }
 }

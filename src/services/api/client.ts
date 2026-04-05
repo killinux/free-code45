@@ -35,7 +35,7 @@ import {
   getVertexRegionForModel,
   isEnvTruthy,
 } from '../../utils/envUtils.js'
-import { createCodexFetch } from './codex-fetch-adapter.js'
+import { createCodexFetch, createOpenAIApiFetch } from './codex-fetch-adapter.js'
 
 /**
  * Environment variables for different client types:
@@ -305,18 +305,32 @@ export async function getAnthropicClient({
     return new AnthropicVertex(vertexArgs) as unknown as Anthropic
   }
 
-  // ── Codex (OpenAI) provider via fetch adapter ─────────────────────
-  if (isCodexSubscriber()) {
-    const codexTokens = getCodexOAuthTokens()
-    if (codexTokens?.accessToken) {
-      const codexFetch = createCodexFetch(codexTokens.accessToken)
+  // ── OpenAI provider via API key or Codex OAuth fetch adapter ──────────────
+  if (getAPIProvider() === 'openai') {
+    const openAIApiKey = process.env.OPENAI_API_KEY
+    if (openAIApiKey) {
+      const openAIFetch = createOpenAIApiFetch(openAIApiKey)
       const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
-        apiKey: 'codex-placeholder', // SDK requires a key but the fetch adapter handles auth
+        apiKey: 'openai-placeholder',
         ...ARGS,
-        fetch: codexFetch as unknown as typeof globalThis.fetch,
+        fetch: openAIFetch as unknown as typeof globalThis.fetch,
         ...(isDebugToStdErr() && { logger: createStderrLogger() }),
       }
       return new Anthropic(clientConfig)
+    }
+
+    if (isCodexSubscriber()) {
+      const codexTokens = getCodexOAuthTokens()
+      if (codexTokens?.accessToken) {
+        const codexFetch = createCodexFetch(codexTokens.accessToken)
+        const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
+          apiKey: 'codex-placeholder', // SDK requires a key but the fetch adapter handles auth
+          ...ARGS,
+          fetch: codexFetch as unknown as typeof globalThis.fetch,
+          ...(isDebugToStdErr() && { logger: createStderrLogger() }),
+        }
+        return new Anthropic(clientConfig)
+      }
     }
   }
 
