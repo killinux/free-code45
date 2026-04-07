@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Code 架构设计文档</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface2: #334155;
+            --border: #475569;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent: #38bdf8;
+            --accent2: #a78bfa;
+            --accent3: #34d399;
+            --accent4: #fb923c;
+            --accent5: #f472b6;
+            --code-bg: #0d1117;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            padding: 0;
+        }
+        .hero {
+            background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 50%, #1a1a2e 100%);
+            padding: 80px 40px;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+            position: relative;
+            overflow: hidden;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%; left: -50%;
+            width: 200%; height: 200%;
+            background: radial-gradient(circle at 30% 50%, rgba(56,189,248,0.08) 0%, transparent 50%),
+                        radial-gradient(circle at 70% 50%, rgba(167,139,250,0.06) 0%, transparent 50%);
+            animation: pulse 8s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+        .hero h1 {
+            font-size: 3em;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            position: relative;
+            margin-bottom: 12px;
+        }
+        .hero .subtitle {
+            font-size: 1.2em;
+            color: var(--text-muted);
+            position: relative;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+        .nav {
+            position: sticky;
+            top: 0;
+            background: rgba(15,23,42,0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            z-index: 100;
+            padding: 12px 24px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            justify-content: center;
+        }
+        .nav a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.85em;
+            padding: 4px 12px;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        .nav a:hover {
+            color: var(--accent);
+            background: var(--surface);
+        }
+        h2 {
+            font-size: 1.8em;
+            font-weight: 700;
+            margin: 60px 0 24px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--accent);
+            color: var(--accent);
+        }
+        h3 {
+            font-size: 1.3em;
+            font-weight: 600;
+            margin: 36px 0 16px;
+            color: var(--accent2);
+        }
+        h4 {
+            font-size: 1.1em;
+            font-weight: 600;
+            margin: 24px 0 12px;
+            color: var(--accent3);
+        }
+        p { margin: 12px 0; }
+        strong { color: var(--accent); }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 16px;
+            margin: 30px 0;
+        }
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--accent);
+        }
+        .stat-card .value {
+            font-size: 1.8em;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .stat-card .label {
+            font-size: 0.85em;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .arch-diagram {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            overflow-x: auto;
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+            font-size: 0.85em;
+            line-height: 1.5;
+            white-space: pre;
+            color: var(--accent3);
+        }
+
+        pre {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 20px;
+            overflow-x: auto;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.85em;
+            line-height: 1.6;
+            margin: 16px 0;
+        }
+        code {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            background: var(--surface2);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: var(--accent4);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--text);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 0.95em;
+        }
+        thead th {
+            background: var(--surface);
+            color: var(--accent);
+            font-weight: 600;
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 2px solid var(--accent);
+        }
+        tbody td {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--surface2);
+        }
+        tbody tr:hover {
+            background: var(--surface);
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, rgba(56,189,248,0.08), rgba(167,139,250,0.08));
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--accent);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .highlight-box.green { border-left-color: var(--accent3); }
+        .highlight-box.purple { border-left-color: var(--accent2); }
+        .highlight-box.orange { border-left-color: var(--accent4); }
+        .highlight-box.pink { border-left-color: var(--accent5); }
+
+        .tech-highlight {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 24px 0;
+        }
+        .tech-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .tech-card:hover {
+            transform: translateY(-3px);
+            border-color: var(--accent2);
+        }
+        .tech-card h4 {
+            margin-top: 0;
+            color: var(--accent);
+        }
+        .tech-card p {
+            color: var(--text-muted);
+            font-size: 0.92em;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.78em;
+            font-weight: 600;
+            margin: 2px 4px;
+        }
+        .tag-blue { background: rgba(56,189,248,0.15); color: var(--accent); }
+        .tag-purple { background: rgba(167,139,250,0.15); color: var(--accent2); }
+        .tag-green { background: rgba(52,211,153,0.15); color: var(--accent3); }
+        .tag-orange { background: rgba(251,146,60,0.15); color: var(--accent4); }
+        .tag-pink { background: rgba(244,114,182,0.15); color: var(--accent5); }
+
+        .flow-step {
+            display: flex;
+            gap: 16px;
+            margin: 12px 0;
+            align-items: flex-start;
+        }
+        .flow-step .step-num {
+            flex-shrink: 0;
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: var(--bg);
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700;
+            font-size: 0.85em;
+        }
+        .flow-step .step-content {
+            flex: 1;
+            padding-top: 4px;
+        }
+
+        ul { padding-left: 24px; margin: 8px 0; }
+        li { margin: 6px 0; }
+
+        .footer {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+            font-size: 0.85em;
+            border-top: 1px solid var(--border);
+            margin-top: 60px;
+        }
+
+        @media (max-width: 768px) {
+            .hero { padding: 40px 20px; }
+            .hero h1 { font-size: 2em; }
+            .container { padding: 20px 16px; }
+            h2 { font-size: 1.4em; }
+            .tech-highlight { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="hero">
+    <h1>Claude Code</h1>
+    <div class="subtitle">Architecture Design Document</div>
+</div>
+
+<nav class="nav">
+    <a href="#overview">概览</a>
+    <a href="#architecture">架构分层</a>
+    <a href="#entrypoints">入口系统</a>
+    <a href="#query-engine">查询引擎</a>
+    <a href="#tool-system">工具系统</a>
+    <a href="#permissions">权限系统</a>
+    <a href="#mcp">MCP 协议</a>
+    <a href="#agents">多 Agent</a>
+    <a href="#compaction">上下文压缩</a>
+    <a href="#memory">记忆系统</a>
+    <a href="#bridge">IDE 桥接</a>
+    <a href="#build">构建系统</a>
+    <a href="#highlights">技术亮点</a>
+    <a href="#dataflow">数据流</a>
+    <a href="#index">目录索引</a>
+    <a href="#principles">设计原则</a>
+</nav>
+
+<div class="container">
+
+    <!-- ==================== 一、项目概览 ==================== -->
+    <h2 id="overview">一、项目概览</h2>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="value">v2.1.87</div>
+            <div class="label">版本</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">TS/TSX</div>
+            <div class="label">语言</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">Bun</div>
+            <div class="label">运行时</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">Ink</div>
+            <div class="label">UI 框架</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">1,914</div>
+            <div class="label">文件数</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">206K</div>
+            <div class="label">代码行数</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">114</div>
+            <div class="label">依赖数</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">40+</div>
+            <div class="label">内置工具</div>
+        </div>
+    </div>
+
+    <!-- ==================== 二、整体架构分层 ==================== -->
+    <h2 id="architecture">二、整体架构分层</h2>
+
+    <div class="arch-diagram">┌─────────────────────────────────────────────────────┐
+│                   Entrypoints Layer                  │
+│  cli.tsx | mcp.ts | sdk/ | agentSdkTypes.ts         │
+├─────────────────────────────────────────────────────┤
+│                    Screen Layer (Ink/React)          │
+│  REPL.tsx | Doctor.tsx | ResumeConversation.tsx      │
+├─────────────────────────────────────────────────────┤
+│              Query Engine (核心调度)                  │
+│  QueryEngine.ts → query.ts → tokenBudget/transitions│
+├──────────────┬──────────────┬───────────────────────┤
+│  Tool System │ Command Sys  │ Skill / Plugin System │
+│  40+ Tools   │ ~90 Commands │ ~/.claude/skills/     │
+├──────────────┴──────────────┴───────────────────────┤
+│                   Services Layer                     │
+│  API | MCP | OAuth | Compact | Analytics | LSP ...  │
+├─────────────────────────────────────────────────────┤
+│              State / Memory / Permissions            │
+│  AppState (Zustand) | memdir/ | permissions/        │
+├─────────────────────────────────────────────────────┤
+│              Infrastructure / Utils                  │
+│  Bridge(IDE) | Tasks | Voice | Native-TS | Vendor   │
+└─────────────────────────────────────────────────────┘</div>
+
+    <!-- ==================== 三、核心子系统 ==================== -->
+    <h2 id="entrypoints">三、核心子系统详解</h2>
+
+    <h3>1. 入口系统 <code>src/entrypoints/</code></h3>
+
+    <p><code>cli.tsx</code> 是主入口，采用<strong>快速路径 (Fast Path)</strong> 设计模式：</p>
+
+    <div class="arch-diagram">cli.tsx 启动
+  ├─ --version        → 零模块加载，直接输出 (极速)
+  ├─ --dump-system-prompt → 提取系统提示词 (eval 用)
+  ├─ --daemon-worker  → Daemon 子进程
+  ├─ claude ps/logs   → 后台会话管理
+  ├─ claude bridge    → IDE 远程桥接
+  └─ 默认             → 进入 REPL 交互主循环</div>
+
+    <div class="highlight-box green">
+        <strong>技术亮点：</strong> 针对不同子命令做"零加载"短路返回，避免加载整个 React 渲染树，CLI 冷启动极快。
+    </div>
+
+    <!-- ==================== 查询引擎 ==================== -->
+    <h3 id="query-engine">2. 查询引擎 <code>QueryEngine.ts</code> + <code>query.ts</code></h3>
+
+    <p>这是整个系统的<strong>心脏</strong>，负责多轮对话的状态机管理。</p>
+
+    <div class="arch-diagram">用户输入
+  ↓ QueryEngine.submitMessage()
+  ├─ 解析引用 (@file, #agent)
+  ├─ 加载记忆附件 (CLAUDE.md)
+  ↓
+  query() 主循环
+  ├─ 构建 System Prompt (getSystemPrompt, 914行)
+  ├─ 消息标准化 (normalizeMessagesForAPI)
+  ├─ 执行 pre-sampling hooks
+  ├─ 流式调用 Anthropic API
+  ├─ 解析工具调用 / 思考块
+  ├─ runTools() → 工具执行
+  ├─ 执行 post-sampling hooks
+  ├─ Token 预算追踪
+  └─ 循环直到 stop_reason === 'end_turn'
+  ↓
+  持久化转录 → 返回渲染</div>
+
+    <div class="highlight-box">
+        <p><strong>Token Budget 管理</strong> (<code>tokenBudget.ts</code>)：实时追踪 token 消耗，接近上限时触发自动压缩</p>
+        <p><strong>状态机转换</strong> (<code>transitions.ts</code>)：明确的 Terminal/Continue 状态，优雅处理多轮工具调用</p>
+        <p><strong>Prompt Cache 利用</strong>：System Prompt 固定在 API 的 prompt cache 中，后续轮次推理加速</p>
+    </div>
+
+    <!-- ==================== 工具系统 ==================== -->
+    <h3 id="tool-system">3. 工具系统 <code>Tool.ts</code> + <code>tools.ts</code> + <code>src/tools/</code></h3>
+
+    <p>最核心的扩展点，采用 <strong>Builder 模式 + 统一接口</strong> 设计。</p>
+
+    <h4>统一工具接口 (Tool.ts, 793 行)</h4>
+
+    <pre><code>interface Tool {
+  // 标识
+  name, aliases, searchHint
+
+  // 执行
+  call(args, context, canUseTool, parentMessage, onProgress)
+
+  // LLM 提示
+  description(), prompt()
+  inputSchema (Zod), outputSchema (Zod)
+
+  // 元数据 / 安全
+  isEnabled(), isReadOnly(), isDestructive()
+  isConcurrencySafe()
+  checkPermissions()
+
+  // 渲染
+  renderToolUseMessage()         // 工具调用时显示
+  renderToolResultMessage()      // 结果显示
+  renderToolUseProgressMessage() // 进度显示
+
+  // 工具搜索优化
+  shouldDefer?, alwaysLoad?
+}</code></pre>
+
+    <h4>工具注册池 (tools.ts, 390 行)</h4>
+
+    <div class="arch-diagram">getAllBaseTools()  →  40+ 内置工具全集
+      ↓
+getTools(permissionContext)  →  按 deny rules 过滤
+      ↓
+assembleToolPool()  →  合并 MCP 外部工具，去重
+      ↓
+最终工具池 → 注入 System Prompt</div>
+
+    <h4>40+ 内置工具分类</h4>
+
+    <table>
+        <thead>
+            <tr><th>类别</th><th>工具</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><span class="tag tag-blue">文件 I/O</span></td>
+                <td>FileReadTool, FileEditTool, FileWriteTool, GlobTool, GrepTool</td>
+            </tr>
+            <tr>
+                <td><span class="tag tag-orange">执行</span></td>
+                <td>BashTool (500+ 行), PowerShellTool, REPLTool</td>
+            </tr>
+            <tr>
+                <td><span class="tag tag-purple">Agent</span></td>
+                <td>AgentTool (233k), SendMessageTool, TeamCreateTool</td>
+            </tr>
+            <tr>
+                <td><span class="tag tag-green">任务</span></td>
+                <td>TaskCreate / Get / Update / List / Output / Stop</td>
+            </tr>
+            <tr>
+                <td><span class="tag tag-blue">搜索</span></td>
+                <td>WebSearchTool, WebFetchTool, ToolSearchTool</td>
+            </tr>
+            <tr>
+                <td><span class="tag tag-pink">规划</span></td>
+                <td>EnterPlanModeTool, ExitPlanModeTool, VerifyPlanExecutionTool</td>
+            </tr>
+            <tr>
+                <td><span class="tag tag-orange">MCP</span></td>
+                <td>MCPTool, ListMcpResourcesTool, ReadMcpResourceTool</td>
+            </tr>
+            <tr>
+                <td><span class="tag tag-green">其他</span></td>
+                <td>SkillTool, NotebookEditTool, SleepTool, ScheduleCronTool</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="highlight-box purple">
+        <p><strong>buildTool() 工厂函数：</strong>所有工具通过统一工厂创建，自动填充安全默认值，类型完全安全</p>
+        <p><strong>工具延迟加载 (Tool Deferral)：</strong>不是所有工具都塞进 prompt，通过 <code>shouldDefer</code> 按需加载，<code>ToolSearchTool</code> 让模型主动搜索，大幅节省 token</p>
+        <p><strong>流式进度回调：</strong>通过 <code>onProgress()</code> 实时推送进度，BashTool 可流式显示命令输出</p>
+    </div>
+
+    <!-- ==================== 权限系统 ==================== -->
+    <h3 id="permissions">4. 权限系统（四层防护）</h3>
+
+    <div class="arch-diagram">Layer 1: Tool 级别     → Tool.checkPermissions() 内部逻辑
+Layer 2: 规则匹配      → settings.json 中的 glob 模式
+          bash: ["git *", "npm *"]
+          file: ["/src/**"]
+Layer 3: 用户交互      → React 权限对话框 (PermissionRequest 组件)
+Layer 4: Auto-Mode 分类器 → 安全分类器检查命令模式</div>
+
+    <div class="highlight-box orange">
+        <p><strong>声明式权限规则：</strong>通过 glob pattern 配置，不需要硬编码</p>
+        <p><strong>分层降级：</strong>先走规则匹配，匹配不到才弹对话框，减少用户干扰</p>
+        <p>12 个专用权限对话框组件，每种操作类型有定制化的 UI</p>
+    </div>
+
+    <!-- ==================== MCP 集成 ==================== -->
+    <h3 id="mcp">5. MCP 协议集成 <code>src/services/mcp/</code></h3>
+
+    <p>MCP (Model Context Protocol) 是让 Claude Code 能调用外部工具服务的关键。</p>
+
+    <div class="arch-diagram">MCP Server Config (stdio/SSE/HTTP/WebSocket/SDK)
+  ↓ useManageMCPConnections() (React Hook)
+  ↓ MCPClient 建立连接
+  ↓ 服务端广播 tools + resources
+  ↓ assembleToolPool() 合并入工具池
+  ↓ MCPTool.call() → client.callTool(server, tool, input)</div>
+
+    <div class="highlight-box">
+        <p><strong>多传输层支持：</strong>stdio / SSE / HTTP / WebSocket / SDK 五种方式</p>
+        <p><strong>OAuth 集成</strong> (<code>auth.ts</code>, 89k)：MCP 服务可以走 OAuth 认证流程</p>
+        <p><strong>无缝合并：</strong>MCP 外部工具和内置工具共用同一个 Tool 接口，对 LLM 透明</p>
+    </div>
+
+    <!-- ==================== 多 Agent ==================== -->
+    <h3 id="agents">6. 多 Agent 系统</h3>
+
+    <p>系统最复杂的部分之一，支持 Agent 的生成、隔离、通信。</p>
+
+    <div class="arch-diagram">用户调用 AgentTool
+  ├─ 加载 Agent 定义 (~/.claude/agents/*.md)
+  ├─ 选择隔离模式:
+  │   ├─ worktree → Git worktree 隔离副本
+  │   ├─ remote   → 远程计算环境 (CCR)
+  │   └─ default  → 同目录执行
+  ├─ 前台: runAgent() → 新 QueryEngine 循环 → 等待完成
+  └─ 后台: LocalAgentTask → 异步执行 → 进度推送</div>
+
+    <h4>任务类型体系</h4>
+    <ul>
+        <li><span class="tag tag-blue">local_bash</span> Shell 命令</li>
+        <li><span class="tag tag-purple">local_agent</span> 本地后台 Agent</li>
+        <li><span class="tag tag-green">remote_agent</span> 远程 Agent</li>
+        <li><span class="tag tag-orange">in_process_teammate</span> 进程内多 Agent 协作</li>
+        <li><span class="tag tag-pink">dream</span> 主动式后台任务</li>
+    </ul>
+
+    <div class="highlight-box green">
+        <p><strong>Prompt Cache Fork</strong> (<code>FORK_SUBAGENT</code>)：子 Agent 复用父 Agent 的 prompt cache，避免重复计算 KV cache</p>
+        <p><strong>Coordinator 模式</strong> (<code>coordinatorMode.ts</code>)：多 Agent 协调器，管理 worker 上下文过滤</p>
+        <p><strong>Git Worktree 隔离：</strong>每个 Agent 在独立的 git worktree 中工作，互不干扰</p>
+    </div>
+
+    <!-- ==================== 上下文压缩 ==================== -->
+    <h3 id="compaction">7. 上下文压缩系统 <code>src/services/compact/</code></h3>
+
+    <div class="arch-diagram">策略 1: Compact Boundary  → 注入压缩标记，截断旧消息
+策略 2: Tool Use Summary  → 多工具序列替换为摘要
+策略 3: Snip-Based        → 省略旧消息，保留近期 (HISTORY_SNIP)
+策略 4: Reactive Compact  → 接近 token 上限时自动触发</div>
+
+    <div class="highlight-box pink">
+        <p><strong>Microcompact Cache：</strong>缓存压缩配置，避免重复计算</p>
+        <p><strong>80% 阈值触发：</strong>上下文超过 token limit 的 80% 时自动压缩</p>
+        <p><strong>对用户透明：</strong>压缩过程会显示提示但不中断工作流</p>
+    </div>
+
+    <!-- ==================== 记忆系统 ==================== -->
+    <h3 id="memory">8. 记忆系统 <code>src/memdir/</code></h3>
+
+    <div class="arch-diagram">~/.claude/CLAUDE.md (项目级)
+  ├─ 项目指令、约定、偏好
+  ├─ 自动加载条件:
+  │   ├─ token 预算充足 (&lt; 200k context)
+  │   ├─ 关键词相关性匹配
+  │   └─ 在时效窗口内
+  └─ 注入到 System Prompt
+
+Team Memory: ~/.claude/teams/{team}/CLAUDE.md
+Session Memory: per-session 临时记忆</div>
+
+    <div class="highlight-box">
+        <p><strong>相关性预取</strong> (<code>startRelevantMemoryPrefetch()</code>)：异步预加载相关记忆，不阻塞主流程</p>
+        <p><strong>团队记忆同步</strong> (<code>teamMemorySync</code>)：多人协作场景下共享项目记忆</p>
+    </div>
+
+    <!-- ==================== IDE 桥接 ==================== -->
+    <h3 id="bridge">9. IDE 桥接 <code>src/bridge/</code></h3>
+
+    <div class="arch-diagram">Claude CLI ←→ Bridge Server ←→ IDE Extension
+           WebSocket / SSE
+           JSON-RPC 协议
+           JWT 认证 + 设备信任</div>
+
+    <div class="highlight-box purple">
+        <p><strong>双向消息协议</strong> (<code>replBridge.ts</code>, 100k)：REPL 和 IDE 实时双向同步</p>
+        <p><strong>安全体系：</strong>JWT 签名 + 设备指纹 + 共享密钥三重保护</p>
+        <p><strong>配置热更新</strong> (<code>pollConfig.ts</code>)：配置变更自动轮询生效</p>
+    </div>
+
+    <!-- ==================== 构建系统 ==================== -->
+    <h3 id="build">10. 构建系统 <code>scripts/build.ts</code></h3>
+
+    <pre><code>// 54 个编译时 Feature Flag
+KAIROS, VOICE_MODE, COORDINATOR_MODE, ULTRAPLAN,
+BRIDGE_MODE, BG_SESSIONS, FORK_SUBAGENT, TORCH, ...
+
+// 构建方式
+bun run build           → ./cli (标准构建)
+bun run build:dev       → ./cli-dev (开发构建)
+bun run build:dev:full  → ./cli-dev (全部实验特性)
+bun run compile         → ./dist/cli (编译优化)</code></pre>
+
+    <div class="highlight-box orange">
+        <p><strong>编译时死代码消除：</strong><code>feature('MY_FLAG')</code> 在构建时求值，未启用的特性整个模块树被移除，零运行时开销</p>
+        <p><strong>分级构建：</strong>标准/开发/全特性三档，外部发布版精确控制暴露的功能</p>
+        <p><strong>Bun 原生 ESM + 字节码：</strong>ESM 格式 + minify + bytecode 编译，启动极快</p>
+    </div>
+
+    <!-- ==================== 技术亮点 ==================== -->
+    <h2 id="highlights">四、十大关键技术亮点</h2>
+
+    <div class="tech-highlight">
+        <div class="tech-card">
+            <h4>1. 编译时 Feature Flag</h4>
+            <p>用 Bun bundler 在编译阶段剔除未启用特性的代码路径。54 个 flag 精确控制，确保外部构建不含内部实验特性。<strong>零运行时开销</strong>。</p>
+        </div>
+        <div class="tech-card">
+            <h4>2. 工具延迟加载</h4>
+            <p>不把 40+ 工具 schema 全塞进 prompt，通过 <code>shouldDefer</code> 标记按需加载，<code>ToolSearchTool</code> 让模型主动搜索。节省数千 token。</p>
+        </div>
+        <div class="tech-card">
+            <h4>3. Prompt Cache Fork</h4>
+            <p>子 Agent 复用父 Agent 已渲染的系统提示词 cache key，避免 API 侧重新计算 KV cache。多 Agent 场景推理延迟显著优化。</p>
+        </div>
+        <div class="tech-card">
+            <h4>4. 流式工具执行</h4>
+            <p>通过 <code>onProgress()</code> 回调实时推送进度。BashTool 流式显示输出，FileEditTool 显示 diff 进度。<strong>用户体验远优于等待模式</strong>。</p>
+        </div>
+        <div class="tech-card">
+            <h4>5. 四层权限模型</h4>
+            <p>工具逻辑 → 声明式规则 → 用户对话框 → 安全分类器，层层递进。既保安全性，又最小化打扰。</p>
+        </div>
+        <div class="tech-card">
+            <h4>6. 智能上下文压缩</h4>
+            <p>四种压缩策略自动管理上下文窗口：边界截断、工具摘要、历史裁剪、响应式触发。80% 阈值触发，对用户透明。</p>
+        </div>
+        <div class="tech-card">
+            <h4>7. Git Worktree 隔离</h4>
+            <p>每个子 Agent 在独立 git worktree 中工作，修改互不影响。完成后自动清理或保留。<strong>真正的并行开发隔离</strong>。</p>
+        </div>
+        <div class="tech-card">
+            <h4>8. Ink React 终端渲染</h4>
+            <p>用 React 组件模型构建终端 UI，权限框、进度条、diff 全是 React 组件。比 ncurses 更易维护，支持键盘/鼠标事件。</p>
+        </div>
+        <div class="tech-card">
+            <h4>9. MCP 多传输层适配</h4>
+            <p>统一 MCP client 支持 stdio / SSE / HTTP / WebSocket / SDK 五种传输，外部工具无缝接入工具池。</p>
+        </div>
+        <div class="tech-card">
+            <h4>10. QueryEngine 与 UI 解耦</h4>
+            <p>QueryEngine 是纯状态机，不依赖 React。同一引擎驱动终端 REPL、headless SDK、多 Agent 克隆。</p>
+        </div>
+    </div>
+
+    <!-- ==================== 数据流 ==================== -->
+    <h2 id="dataflow">五、数据流全景</h2>
+
+    <div class="arch-diagram">User Input
+  ↓
+REPL.tsx (Ink React)
+  ├─ 解析引用 (@file, #agent)
+  ├─ 附加记忆 (CLAUDE.md)
+  └─ QueryEngine.submitMessage()
+       ↓
+     query() 主循环
+       ├─ System Prompt 组装 (914 行逻辑)
+       ├─ 消息标准化
+       ├─ Anthropic API 流式调用 (withRetry)
+       ├─ 工具调用检测
+       │    ↓
+       │  权限检查 → 工具执行 → 进度推送
+       │    ↓
+       │  结果注入消息队列
+       ├─ Token 预算检查 → 可能触发压缩
+       ├─ Hook 执行 (pre/post)
+       └─ 循环 or 终止
+            ↓
+       消息渲染 → 转录持久化 → 等待下一轮</div>
+
+    <h3>工具执行流程</h3>
+
+    <div class="flow-step">
+        <div class="step-num">1</div>
+        <div class="step-content">API 响应中检测到 Tool Call → 提取 <code>ToolUseBlock</code></div>
+    </div>
+    <div class="flow-step">
+        <div class="step-num">2</div>
+        <div class="step-content">Zod Schema 验证输入 → 权限检查 (<code>checkPermissions</code>) → 必要时弹出用户对话框</div>
+    </div>
+    <div class="flow-step">
+        <div class="step-num">3</div>
+        <div class="step-content">调用 <code>tool.call()</code> 执行操作，通过 <code>onProgress()</code> 实时推送进度</div>
+    </div>
+    <div class="flow-step">
+        <div class="step-num">4</div>
+        <div class="step-content"><code>StreamingToolExecutor</code> 收集进度、渲染 UI、持久化转录</div>
+    </div>
+    <div class="flow-step">
+        <div class="step-num">5</div>
+        <div class="step-content">结果映射为 <code>ToolResultBlockParam</code> → 注入消息队列 → 继续下一轮 API 调用</div>
+    </div>
+
+    <h3>Agent 生成流程</h3>
+
+    <div class="arch-diagram">用户调用 Agent tool
+  ↓ AgentTool.call(input)
+  ├─ 加载 agent 定义 (agents/*.md/json)
+  ├─ 检查 model 权限
+  ├─ 准备 forked messages (FORK_SUBAGENT)
+  ├─ 选择隔离模式:
+  │  ├─ worktree → createAgentWorktree()
+  │  ├─ remote → checkRemoteAgentEligibility()
+  │  └─ default → 同目录
+  ├─ 后台模式 (run_in_background: true):
+  │  ├─ 创建 LocalAgentTask
+  │  ├─ registerAsyncAgent()
+  │  └─ 返回 {status: 'async_launched'}
+  └─ 前台模式:
+     ├─ runAgent() (新 QueryEngine)
+     ├─ 等待完成
+     └─ 返回 {status: 'completed', ...result}</div>
+
+    <!-- ==================== System Prompt ==================== -->
+    <h3>System Prompt 组装层次</h3>
+
+    <div class="flow-step">
+        <div class="step-num">1</div>
+        <div class="step-content">基础指令（文件操作、工具使用规范）</div>
+    </div>
+    <div class="flow-step">
+        <div class="step-num">2</div>
+        <div class="step-content">工具目录（name, description, inputSchema）</div>
+    </div>
+    <div class="flow-step">
+        <div class="step-num">3</div>
+        <div class="step-content">上下文（cwd, git info, environment）</div>
+    </div>
+    <div class="flow-step">
+        <div class="step-num">4</div>
+        <div class="step-content">记忆（CLAUDE.md 内容）</div>
+    </div>
+    <div class="flow-step">
+        <div class="step-num">5</div>
+        <div class="step-content">特性专属段落（tool search, thinking 等）</div>
+    </div>
+    <div class="flow-step">
+        <div class="step-num">6</div>
+        <div class="step-content">用户自定义覆盖（appendSystemPrompt, customSystemPrompt）</div>
+    </div>
+
+    <!-- ==================== 目录索引 ==================== -->
+    <h2 id="index">六、关键目录索引</h2>
+
+    <table>
+        <thead>
+            <tr><th>模块</th><th>路径</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>入口</td><td><code>src/entrypoints/cli.tsx</code></td><td>CLI 主入口</td></tr>
+            <tr><td>查询引擎</td><td><code>src/QueryEngine.ts</code></td><td>会话生命周期</td></tr>
+            <tr><td>查询循环</td><td><code>src/query.ts</code></td><td>主查询逻辑</td></tr>
+            <tr><td>工具接口</td><td><code>src/Tool.ts</code></td><td>统一工具定义 (793行)</td></tr>
+            <tr><td>工具注册</td><td><code>src/tools.ts</code></td><td>工具池组装 (390行)</td></tr>
+            <tr><td>工具实现</td><td><code>src/tools/</code></td><td>47 个工具目录</td></tr>
+            <tr><td>命令注册</td><td><code>src/commands.ts</code></td><td>~90 命令 (500+行)</td></tr>
+            <tr><td>屏幕</td><td><code>src/screens/REPL.tsx</code></td><td>主交互 UI</td></tr>
+            <tr><td>组件</td><td><code>src/components/</code></td><td>200+ UI 组件</td></tr>
+            <tr><td>状态</td><td><code>src/state/AppState.tsx</code></td><td>全局状态类型</td></tr>
+            <tr><td>MCP</td><td><code>src/services/mcp/</code></td><td>MCP 协议 (300k+行)</td></tr>
+            <tr><td>Agent</td><td><code>src/tools/AgentTool/</code></td><td>多 Agent 系统</td></tr>
+            <tr><td>记忆</td><td><code>src/memdir/</code></td><td>记忆管理</td></tr>
+            <tr><td>桥接</td><td><code>src/bridge/</code></td><td>IDE 集成 (300k+行)</td></tr>
+            <tr><td>权限</td><td><code>src/utils/permissions/</code></td><td>权限引擎</td></tr>
+            <tr><td>压缩</td><td><code>src/services/compact/</code></td><td>上下文压缩</td></tr>
+            <tr><td>Prompt</td><td><code>src/constants/prompts.ts</code></td><td>系统提示词 (914行)</td></tr>
+            <tr><td>构建</td><td><code>scripts/build.ts</code></td><td>构建脚本 (200行)</td></tr>
+        </tbody>
+    </table>
+
+    <!-- ==================== 设计原则 ==================== -->
+    <h2 id="principles">七、设计原则总结</h2>
+
+    <div class="tech-highlight">
+        <div class="tech-card">
+            <h4>模块化 + 统一接口</h4>
+            <p>所有工具、命令、技能都遵循统一接口，通过注册表管理</p>
+        </div>
+        <div class="tech-card">
+            <h4>编译时优化</h4>
+            <p>Feature Flag 在构建时消除死代码，而非运行时判断</p>
+        </div>
+        <div class="tech-card">
+            <h4>分层权限</h4>
+            <p>安全不是一刀切，工具级 → 规则级 → 用户级 → 分类器级逐层递进</p>
+        </div>
+        <div class="tech-card">
+            <h4>UI 与逻辑解耦</h4>
+            <p>QueryEngine 不依赖 React，支持 CLI / SDK / 多 Agent 多种使用方式</p>
+        </div>
+        <div class="tech-card">
+            <h4>协议标准化</h4>
+            <p>MCP 协议统一外部工具接入，无论传输层如何变化</p>
+        </div>
+        <div class="tech-card">
+            <h4>Token 精打细算</h4>
+            <p>延迟加载工具、智能压缩、prompt cache 复用，多维度优化</p>
+        </div>
+        <div class="tech-card">
+            <h4>隔离与并行</h4>
+            <p>Git worktree 级别的 Agent 隔离，支持真正的并行开发</p>
+        </div>
+        <div class="tech-card">
+            <h4>渐进式复杂度</h4>
+            <p>从简单 Bash 到多 Agent 协调，功能按需启用，不增加基础复杂度</p>
+        </div>
+    </div>
+
+</div>
+
+<div class="footer">
+    Claude Code Architecture Document &mdash; Generated 2026-04-07
+</div>
+
+</body>
+</html>

@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Code 多供应商配置指南</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface2: #334155;
+            --border: #475569;
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --accent: #38bdf8;
+            --accent2: #a78bfa;
+            --green: #34d399;
+            --orange: #fb923c;
+            --red: #f87171;
+            --code-bg: #0d1117;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+            background: var(--bg); color: var(--text); line-height: 1.7; padding: 0;
+        }
+        .hero {
+            background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 50%, #1a1a2e 100%);
+            padding: 60px 40px; text-align: center;
+            border-bottom: 1px solid var(--border);
+        }
+        .hero h1 {
+            font-size: 2.4em; font-weight: 800;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .hero .sub { color: var(--muted); font-size: 1.1em; margin-top: 8px; }
+        .container { max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+        nav.toc {
+            position: sticky; top: 0; z-index: 100;
+            background: rgba(15,23,42,0.95); backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            padding: 10px 24px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+        }
+        nav.toc a {
+            color: var(--muted); text-decoration: none; font-size: 0.85em;
+            padding: 4px 12px; border-radius: 6px; transition: all 0.2s;
+        }
+        nav.toc a:hover { color: var(--accent); background: var(--surface); }
+        h2 {
+            font-size: 1.6em; font-weight: 700; margin: 50px 0 20px;
+            padding-bottom: 10px; border-bottom: 2px solid var(--accent); color: var(--accent);
+        }
+        h3 { font-size: 1.2em; font-weight: 600; margin: 30px 0 14px; color: var(--accent2); }
+        p { margin: 10px 0; }
+        strong { color: var(--accent); }
+        pre {
+            background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+            padding: 18px; overflow-x: auto;
+            font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.88em; line-height: 1.6;
+            margin: 14px 0; position: relative;
+        }
+        code {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            background: var(--surface2); padding: 2px 6px; border-radius: 4px;
+            font-size: 0.9em; color: var(--orange);
+        }
+        pre code { background: none; padding: 0; color: var(--text); }
+        .box {
+            border: 1px solid var(--border); border-radius: 10px;
+            padding: 18px; margin: 16px 0;
+            background: linear-gradient(135deg, rgba(56,189,248,0.06), rgba(167,139,250,0.06));
+        }
+        .box.green { border-left: 4px solid var(--green); }
+        .box.orange { border-left: 4px solid var(--orange); }
+        .box.red { border-left: 4px solid var(--red); }
+        .box.blue { border-left: 4px solid var(--accent); }
+        table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 0.95em; }
+        thead th {
+            background: var(--surface); color: var(--accent); font-weight: 600;
+            padding: 10px 14px; text-align: left; border-bottom: 2px solid var(--accent);
+        }
+        tbody td { padding: 9px 14px; border-bottom: 1px solid var(--surface2); }
+        tbody tr:hover { background: var(--surface); }
+        .tag {
+            display: inline-block; padding: 3px 12px; border-radius: 12px;
+            font-size: 0.82em; font-weight: 600;
+        }
+        .tag-green { background: rgba(52,211,153,0.15); color: var(--green); }
+        .tag-blue { background: rgba(56,189,248,0.15); color: var(--accent); }
+        .tag-purple { background: rgba(167,139,250,0.15); color: var(--accent2); }
+        .tag-orange { background: rgba(251,146,60,0.15); color: var(--orange); }
+        .diagram {
+            background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+            padding: 20px; margin: 16px 0; overflow-x: auto;
+            font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.85em;
+            line-height: 1.5; white-space: pre; color: var(--green);
+        }
+        .provider-card {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+            padding: 24px; margin: 16px 0; transition: border-color 0.2s;
+        }
+        .provider-card:hover { border-color: var(--accent); }
+        .provider-card h4 {
+            font-size: 1.1em; font-weight: 700; margin: 0 0 12px;
+        }
+        .provider-card .meta { color: var(--muted); font-size: 0.88em; margin-bottom: 12px; }
+        ul { padding-left: 24px; margin: 8px 0; }
+        li { margin: 5px 0; }
+        .footer {
+            text-align: center; padding: 30px; color: var(--muted);
+            font-size: 0.85em; border-top: 1px solid var(--border); margin-top: 50px;
+        }
+        @media (max-width: 768px) {
+            .hero { padding: 30px 16px; }
+            .hero h1 { font-size: 1.8em; }
+            .container { padding: 20px 14px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="hero">
+    <h1>Claude Code 多供应商配置</h1>
+    <div class="sub">CLAUDE_CONFIG_DIR 一键切换不同 API 供应商</div>
+</div>
+
+<nav class="toc">
+    <a href="#quickstart">快速开始</a>
+    <a href="#principle">原理</a>
+    <a href="#configs">配置示例</a>
+    <a href="#setup">搭建步骤</a>
+    <a href="#alias">Alias 设置</a>
+    <a href="#concurrent">同时运行</a>
+    <a href="#settings-ref">settings.json 参考</a>
+    <a href="#faq">常见问题</a>
+</nav>
+
+<div class="container">
+
+    <!-- ========== 快速开始 ========== -->
+    <h2 id="quickstart">快速开始</h2>
+
+    <div class="box green">
+        <strong>一句话：</strong>每个供应商一个配置目录，通过 <code>CLAUDE_CONFIG_DIR</code> 环境变量切换。零代码改动，立即可用。
+    </div>
+
+    <pre><code># 默认供应商（使用 ~/.claude/）
+./cli
+
+# 切换到 Kimi
+CLAUDE_CONFIG_DIR=~/.claude-kimi ./cli
+
+# 切换到 MiniMax
+CLAUDE_CONFIG_DIR=~/.claude-minimax ./cli</code></pre>
+
+    <!-- ========== 原理 ========== -->
+    <h2 id="principle">原理</h2>
+
+    <p>Claude Code 的所有配置（API Key、Base URL、Model、会话、记忆等）都存储在 <code>~/.claude/</code> 目录下。
+    全局路径通过 <code>getClaudeConfigHomeDir()</code> 解析，该函数尊重 <code>CLAUDE_CONFIG_DIR</code> 环境变量。</p>
+
+    <div class="diagram">CLAUDE_CONFIG_DIR 未设置:
+  getClaudeConfigHomeDir() → ~/.claude/
+
+CLAUDE_CONFIG_DIR=~/.claude-kimi:
+  getClaudeConfigHomeDir() → ~/.claude-kimi/</div>
+
+    <p>设置不同的 <code>CLAUDE_CONFIG_DIR</code> 值，两个实例使用<strong>完全独立</strong>的配置目录，互不干扰。</p>
+
+    <div class="diagram">~/.claude/              ← 默认 (MiniMax)
+  ├── settings.json     ← MiniMax 的 API Key / Base URL / Model
+  ├── .claude.json      ← MiniMax 的全局配置
+  ├── projects/         ← MiniMax 的会话历史
+  └── ...
+
+~/.claude-kimi/         ← Kimi
+  ├── settings.json     ← Kimi 的 API Key / Base URL / Model
+  ├── .claude.json      ← Kimi 的全局配置 (首次启动自动生成)
+  ├── projects/         ← Kimi 的会话历史
+  └── ...</div>
+
+    <!-- ========== 配置示例 ========== -->
+    <h2 id="configs">配置示例</h2>
+
+    <div class="provider-card">
+        <h4 style="color: var(--accent);">MiniMax (MiniMax-M2.5)</h4>
+        <div class="meta">Base URL: https://api.minimaxi.com/anthropic</div>
+        <pre><code>{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "sk-cp-6Lu8lyKJPp2WN47toqzi...",
+    "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic",
+    "ANTHROPIC_MODEL": "MiniMax-M2.5",
+    "ANTHROPIC_SMALL_FAST_MODEL": "MiniMax-M2.5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "MiniMax-M2.5",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "MiniMax-M2.5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "MiniMax-M2.5",
+    "API_TIMEOUT_MS": "3000000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  }
+}</code></pre>
+    </div>
+
+    <div class="provider-card">
+        <h4 style="color: var(--accent2);">Kimi (kimi-k2.5)</h4>
+        <div class="meta">Base URL: https://api.moonshot.cn/anthropic</div>
+        <pre><code>{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "sk-YHcMjIH00MOoNaejo29v...",
+    "ANTHROPIC_BASE_URL": "https://api.moonshot.cn/anthropic",
+    "ANTHROPIC_MODEL": "kimi-k2.5",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-k2.5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k2.5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-k2.5",
+    "API_TIMEOUT_MS": "600000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  },
+  "model": "kimi-k2.5",
+  "permissions": {
+    "allow": ["Read(*)", "Glob(*)"],
+    "ask": ["Edit(*)", "Write(*)", "Bash(*)"],
+    "deny": ["Bash(sudo:*)", "Bash(rm -rf:*)", "Read(**/.env)"],
+    "defaultMode": "ask"
+  }
+}</code></pre>
+    </div>
+
+    <!-- ========== 搭建步骤 ========== -->
+    <h2 id="setup">搭建步骤</h2>
+
+    <h3>第 1 步：创建供应商配置目录</h3>
+
+    <pre><code># Kimi 配置目录
+mkdir -p ~/.claude-kimi</code></pre>
+
+    <h3>第 2 步：写入 settings.json</h3>
+
+    <pre><code>cat &gt; ~/.claude-kimi/settings.json &lt;&lt; 'EOF'
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "sk-YHcMjIH00MOoNaejo29vKsvXI8Q03lpBHDAWwAM3Z7iiUsBu",
+    "ANTHROPIC_BASE_URL": "https://api.moonshot.cn/anthropic",
+    "ANTHROPIC_MODEL": "kimi-k2.5",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-k2.5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k2.5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-k2.5",
+    "API_TIMEOUT_MS": "600000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  },
+  "model": "kimi-k2.5",
+  "permissions": {
+    "allow": ["Read(*)", "Glob(*)"],
+    "ask": ["Edit(*)", "Write(*)", "Bash(*)"],
+    "deny": ["Bash(sudo:*)", "Bash(rm -rf:*)", "Read(**/.env)"],
+    "defaultMode": "ask"
+  }
+}
+EOF
+
+chmod 600 ~/.claude-kimi/settings.json</code></pre>
+
+    <h3>第 3 步：验证</h3>
+
+    <pre><code># 用 Kimi 启动
+CLAUDE_CONFIG_DIR=~/.claude-kimi ./cli
+
+# 在交互界面中确认模型
+# 应显示 kimi-k2.5 相关信息</code></pre>
+
+    <!-- ========== Alias ========== -->
+    <h2 id="alias">Alias 设置</h2>
+
+    <p>将以下内容加入 <code>~/.bashrc</code> 或 <code>~/.zshrc</code>：</p>
+
+    <pre><code># Claude Code 多供应商 alias
+CLI_PATH="/opt/workspace/myclaude/free-code45/cli"
+
+alias claude-minimax="$CLI_PATH"
+alias claude-kimi="CLAUDE_CONFIG_DIR=~/.claude-kimi $CLI_PATH"
+
+# 如有更多供应商，继续添加：
+# alias claude-deepseek="CLAUDE_CONFIG_DIR=~/.claude-deepseek $CLI_PATH"
+# alias claude-openai="CLAUDE_CONFIG_DIR=~/.claude-openai $CLI_PATH"</code></pre>
+
+    <pre><code># 生效
+source ~/.bashrc
+
+# 使用
+claude-minimax        # MiniMax
+claude-kimi           # Kimi</code></pre>
+
+    <!-- ========== 同时运行 ========== -->
+    <h2 id="concurrent">同时运行多个供应商</h2>
+
+    <div class="box blue">
+        <strong>完全安全。</strong>每个实例操作自己独立的 lockfile、PID 文件和配置文件，互不干扰。
+    </div>
+
+    <pre><code># 终端 1 — MiniMax
+claude-minimax
+
+# 终端 2 — Kimi (同时运行)
+claude-kimi</code></pre>
+
+    <!-- ========== settings.json 参考 ========== -->
+    <h2 id="settings-ref">settings.json 字段参考</h2>
+
+    <table>
+        <thead>
+            <tr><th>字段</th><th>说明</th><th>示例</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>env.ANTHROPIC_AUTH_TOKEN</code></td>
+                <td>API 认证令牌（Bearer Token 方式）</td>
+                <td><code>sk-xxx...</code></td>
+            </tr>
+            <tr>
+                <td><code>env.ANTHROPIC_BASE_URL</code></td>
+                <td>API 端点地址</td>
+                <td><code>https://api.moonshot.cn/anthropic</code></td>
+            </tr>
+            <tr>
+                <td><code>env.ANTHROPIC_MODEL</code></td>
+                <td>主模型名</td>
+                <td><code>kimi-k2.5</code></td>
+            </tr>
+            <tr>
+                <td><code>env.ANTHROPIC_DEFAULT_OPUS_MODEL</code></td>
+                <td>Opus 级别模型映射</td>
+                <td><code>kimi-k2.5</code></td>
+            </tr>
+            <tr>
+                <td><code>env.ANTHROPIC_DEFAULT_SONNET_MODEL</code></td>
+                <td>Sonnet 级别模型映射</td>
+                <td><code>kimi-k2.5</code></td>
+            </tr>
+            <tr>
+                <td><code>env.ANTHROPIC_DEFAULT_HAIKU_MODEL</code></td>
+                <td>Haiku 级别模型映射</td>
+                <td><code>kimi-k2.5</code></td>
+            </tr>
+            <tr>
+                <td><code>env.ANTHROPIC_SMALL_FAST_MODEL</code></td>
+                <td>轻量快速模型（工具搜索等）</td>
+                <td><code>MiniMax-M2.5</code></td>
+            </tr>
+            <tr>
+                <td><code>env.API_TIMEOUT_MS</code></td>
+                <td>API 超时时间（毫秒）</td>
+                <td><code>600000</code> (10 分钟)</td>
+            </tr>
+            <tr>
+                <td><code>env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC</code></td>
+                <td>禁用非必要网络请求（遥测、更新检查等）</td>
+                <td><code>"1"</code></td>
+            </tr>
+            <tr>
+                <td><code>model</code></td>
+                <td>顶层模型设置（可选，覆盖 env 中的值）</td>
+                <td><code>"kimi-k2.5"</code></td>
+            </tr>
+            <tr>
+                <td><code>permissions</code></td>
+                <td>工具权限规则</td>
+                <td>见下方说明</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>权限配置说明</h3>
+
+    <pre><code>"permissions": {
+  "allow": ["Read(*)", "Glob(*)"],          // 自动允许
+  "ask":   ["Edit(*)", "Write(*)", "Bash(*)"], // 每次询问
+  "deny":  ["Bash(sudo:*)", "Bash(rm -rf:*)", "Read(**/.env)"], // 禁止
+  "defaultMode": "ask"                      // 未匹配时的默认行为
+}</code></pre>
+
+    <table>
+        <thead>
+            <tr><th>规则</th><th>含义</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Read(*)</code></td><td>允许读取任意文件</td></tr>
+            <tr><td><code>Glob(*)</code></td><td>允许文件搜索</td></tr>
+            <tr><td><code>Edit(*)</code></td><td>编辑文件前询问</td></tr>
+            <tr><td><code>Bash(sudo:*)</code></td><td>禁止 sudo 命令</td></tr>
+            <tr><td><code>Bash(rm -rf:*)</code></td><td>禁止 rm -rf</td></tr>
+            <tr><td><code>Read(**/.env)</code></td><td>禁止读取 .env 文件</td></tr>
+        </tbody>
+    </table>
+
+    <!-- ========== 隔离范围 ========== -->
+    <h3>每个 CLAUDE_CONFIG_DIR 完全隔离的内容</h3>
+
+    <table>
+        <thead>
+            <tr><th>数据</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>settings.json</td><td>API Key、Base URL、Model、权限规则</td></tr>
+            <tr><td>.claude.json</td><td>全局配置（theme、启动计数、项目配置等）</td></tr>
+            <tr><td>.credentials.json</td><td>OAuth 凭据（如有）</td></tr>
+            <tr><td>projects/</td><td>会话/对话历史</td></tr>
+            <tr><td>sessions/</td><td>并发会话追踪</td></tr>
+            <tr><td>skills/ commands/</td><td>自定义技能和命令</td></tr>
+            <tr><td>plugins/</td><td>插件缓存</td></tr>
+            <tr><td>cache/</td><td>模型能力缓存、更新日志</td></tr>
+        </tbody>
+    </table>
+
+    <!-- ========== FAQ ========== -->
+    <h2 id="faq">常见问题</h2>
+
+    <h3>Q: 两个供应商可以同时运行吗？</h3>
+    <div class="box green">
+        <strong>可以。</strong>每个实例的 lockfile、PID、配置都在各自目录下，完全独立。
+    </div>
+
+    <h3>Q: 新建的配置目录需要手动创建 .claude.json 吗？</h3>
+    <div class="box blue">
+        <strong>不需要。</strong>首次启动时 Claude Code 会自动生成默认的 <code>.claude.json</code>。
+        只需创建 <code>settings.json</code> 写入 API 配置即可。
+    </div>
+
+    <h3>Q: 能否共享 skills 和 plugins？</h3>
+    <div class="box orange">
+        <strong>不能自动共享。</strong><code>CLAUDE_CONFIG_DIR</code> 是完全隔离方案。
+        如果需要共享，可以用软链接：
+        <pre><code>ln -s ~/.claude/skills ~/.claude-kimi/skills
+ln -s ~/.claude/plugins ~/.claude-kimi/plugins</code></pre>
+    </div>
+
+    <h3>Q: settings.json 放在哪里？</h3>
+    <div class="box blue">
+        <p>有多个位置，按优先级从低到高：</p>
+        <table>
+            <tbody>
+                <tr><td><code>~/.claude/settings.json</code></td><td>用户全局（或 CLAUDE_CONFIG_DIR 下）</td></tr>
+                <tr><td><code>项目根/.claude/settings.json</code></td><td>项目共享（可入 git）</td></tr>
+                <tr><td><code>项目根/.claude/settings.local.json</code></td><td>项目本地（gitignore）</td></tr>
+            </tbody>
+        </table>
+        <p>含 API Key 的配置<strong>不要</strong>放在项目目录中（避免泄露）。</p>
+    </div>
+
+    <h3>Q: 如何清理某个供应商配置？</h3>
+    <pre><code>rm -rf ~/.claude-kimi</code></pre>
+
+</div>
+
+<div class="footer">
+    Claude Code Multi-Provider Configuration Guide &mdash; 2026-04-07
+</div>
+
+</body>
+</html>
