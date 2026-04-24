@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code 记忆与 Session 深度解析</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --text2: #8b949e;
+    --blue: #58a6ff; --green: #3fb950; --orange: #d29922;
+    --purple: #bc8cff; --red: #f85149; --cyan: #39d2c0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', sans-serif; padding: 24px; line-height: 1.6; max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  h2 { font-size: 17px; margin-top: 44px; margin-bottom: 4px; }
+  .sub { color: var(--text2); font-size: 13px; margin-bottom: 24px; }
+  p { font-size: 14px; margin-bottom: 12px; }
+  .section { margin-bottom: 28px; }
+  .stitle { font-size: 14px; font-weight: 600; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .box { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 18px; margin-bottom: 16px; }
+  .box pre { font-size: 12px; line-height: 1.9; margin: 0; white-space: pre-wrap; }
+  .t { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; vertical-align: middle; }
+  .t-s { background: rgba(88,166,255,0.18); color: var(--blue); }
+  .t-m { background: rgba(188,140,255,0.18); color: var(--purple); }
+  .t-d { background: rgba(63,185,80,0.18); color: var(--green); }
+  .t-c { background: rgba(210,153,34,0.18); color: var(--orange); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 10px; background: var(--card); color: var(--text2); font-weight: 500; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: rgba(88,166,255,0.04); }
+  code { font-family: 'SF Mono', Consolas, monospace; font-size: 12px; color: var(--blue); }
+  .note { color: var(--text2); font-size: 13px; margin-top: 16px; padding: 12px 14px; background: var(--card); border-radius: 6px; border-left: 3px solid var(--blue); }
+  .arrow { text-align: center; color: var(--text2); font-size: 18px; line-height: 1.2; padding: 4px 0; }
+  .pbar { padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<h1>Claude Code 记忆与 Session 深度解析</h1>
+<p class="sub">从真实使用场景出发，理解 Session、Memory、Context 如何协作，跨会话记忆如何流转，系统能做什么和不能做什么</p>
+
+<!-- ===== Part 1 ===== -->
+<h2>一、三个核心概念</h2>
+
+<div class="section">
+  <table>
+    <thead>
+      <tr><th style="width:100px">概念</th><th style="width:140px">一句话</th><th style="width:120px">存在哪里</th><th style="width:90px">生命周期</th><th>类比</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="t t-s">Session</span></td>
+        <td>一次对话进程</td>
+        <td>进程内存 + jsonl</td>
+        <td>启动 &rarr; 退出</td>
+        <td>打开文档编辑，关掉就没了（但有自动保存）</td>
+      </tr>
+      <tr>
+        <td><span class="t t-m">Memory</span></td>
+        <td>跨会话的持久知识</td>
+        <td>磁盘 .md 文件</td>
+        <td>永久</td>
+        <td>笔记本上的笔记，下次打开还在</td>
+      </tr>
+      <tr>
+        <td><span class="t t-c">Context</span></td>
+        <td>项目级的固定指令</td>
+        <td>CLAUDE.md + git status</td>
+        <td>会话级缓存</td>
+        <td>办公室墙上的规章制度</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- HUD Context% -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--red)"></span>注意：claude-hud 的 "Context" 是第四个概念</div>
+  <p>claude-hud 状态栏显示的 <b>Context%</b> 和上面的 <span class="t t-c">Context</span> <b>不是同一个东西</b>：</p>
+  <table>
+    <thead>
+      <tr><th style="width:160px">概念</th><th style="width:200px">含义</th><th>包含什么</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="t t-c">Context</span><br><small>（我们讨论的）</small></td>
+        <td>项目级固定指令<br>CLAUDE.md + git status</td>
+        <td>只是 API 请求中的一个<b>组成部分</b>，占 ~1-2%</td>
+      </tr>
+      <tr style="background:rgba(248,81,73,0.03)">
+        <td><span class="t" style="background:rgba(248,81,73,0.18);color:var(--red)">HUD Context%</span><br><small>（状态栏显示的）</small></td>
+        <td>上下文窗口使用率<br><code>(总 token / 窗口大小) &times; 100%</code></td>
+        <td><b>包含一切</b>：System Prompt + Tools Schema + CLAUDE.md + 对话历史 + tool_result + Memory 附件</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="box" style="margin-top:12px;">
+    <pre style="font-size:12px;line-height:1.8;"><span style="color:var(--orange);font-weight:600">HUD Context% 的组成：</span>
+
+  <span style="color:var(--green)">System Prompt</span>     ~3-4%  固定  <span style="color:var(--text2)">(含 Memory 指令 + MEMORY.md 索引)</span>
++ <span style="color:var(--cyan)">Tools Schema</span>      ~5%    固定  <span style="color:var(--text2)">(43 个工具定义)</span>
++ <span style="color:var(--orange)">CLAUDE.md + git</span>   ~1-2%  固定  <span style="color:var(--text2)">(我们讨论的 "Context")</span>
++ <span style="color:var(--purple)">Memory 附件</span>       0-2%   波动  <span style="color:var(--text2)">(Sonnet 选出的记忆内容)</span>
++ <span style="color:var(--blue)">对话历史</span>          持续增长      <span style="color:var(--text2)">(用户消息 + LLM 回复)</span>
++ <span style="color:var(--red)"><b>tool_result</b></span>       <span style="color:var(--red)">持续增长</span>      <span style="color:var(--text2)">(文件读取、命令输出 — <b>增长主力</b>)</span>
+─────────────────────────────────
+= HUD Context%    / 200K 或 1M 窗口
+
+<span style="color:var(--text2)">Context 和 Memory 索引是<b>固定开销</b>（~10%），不是增长源。</span>
+<span style="color:var(--text2)">tool_result 是增长主力 — 一次 Read 大文件就可能 +5%。</span>
+<span style="color:var(--text2)">接近上限时 auto-compact 触发，Context% 从 ~85% 降到 ~12%。</span></pre>
+  </div>
+</div>
+
+<!-- Storage -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--green)"></span>磁盘上存了什么</div>
+  <div class="box">
+    <pre>~/.claude/
+&boxvr; CLAUDE.md                                <span class="t t-c">Context</span> 全局指令
+&boxur; projects/
+   &boxur; -opt-mywork-mytest-bl/               <span style="color:var(--text2)">(路径中 / 替换为 -)</span>
+       &boxvr; <span style="color:var(--blue)">a1b2c3d4-...jsonl</span>              <span class="t t-s">Session</span> 第 1 次对话完整记录
+       &boxvr; <span style="color:var(--blue)">e5f6g7h8-...jsonl</span>              <span class="t t-s">Session</span> 第 2 次对话完整记录
+       &boxvr; <span style="color:var(--blue)">i9j0k1l2-.../subagents/</span>        <span class="t t-s">Session</span> 子 Agent 记录
+       &boxur; memory/                          <span class="t t-m">Memory</span>
+           &boxvr; MEMORY.md                    索引 (200 行上限)
+           &boxvr; feedback_no_cut_weights.md
+           &boxvr; project_hip_leg_fix.md
+           &boxvr; reference_todo_doc.md
+           &boxur; ...                          最多 200 个文件
+
+项目代码目录/
+&boxvr; CLAUDE.md                                <span class="t t-c">Context</span> 项目级指令 (commit 到 git)
+&boxvr; CLAUDE.local.md                          <span class="t t-c">Context</span> 本地覆盖 (.gitignored)
+&boxur; doc/
+   &boxur; hip_leg_fix_methods.md               <span class="t t-d">项目文档</span> (LLM 写的, commit 到 git)</pre>
+  </div>
+</div>
+
+<!-- jsonl -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--blue)"></span>Session jsonl 里的记录类型</div>
+  <table>
+    <thead><tr><th style="width:160px">type</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td><code>permission-mode</code></td><td>权限模式 (default/yolo)</td></tr>
+      <tr><td><code>user</code></td><td>用户每条消息原文</td></tr>
+      <tr><td><code>assistant</code></td><td>LLM 回复 (model, tool_use, text)</td></tr>
+      <tr><td><code>attachment</code></td><td>附件 (延迟工具, 记忆, 技能)</td></tr>
+      <tr><td><code>file-history-snapshot</code></td><td>文件修改快照</td></tr>
+    </tbody>
+  </table>
+  <p style="color:var(--text2);font-size:12px;">完整的对话"录像"，100% 信息。用于 <code>--resume</code> 和 <code>/history</code>。</p>
+</div>
+
+<!-- memory format -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--purple)"></span>Memory 文件格式</div>
+  <div class="box">
+    <pre>---
+name: 不要轻易切权重
+description: xtra 辅助骨用 PRESERVE 保留
+type: feedback               <span style="color:var(--text2)">&larr; user / feedback / project / reference</span>
+originSessionId: f9d557d1-...
+---
+
+不要切分或合并 XPS corrective bone 的权重。
+
+**Why:** 这些骨骼方向故意和父骨不同...
+**How to apply:** PRESERVE_HELPER_KEYWORDS...</pre>
+  </div>
+  <table>
+    <thead><tr><th style="width:100px">类型</th><th style="width:120px">存什么</th><th>举例</th></tr></thead>
+    <tbody>
+      <tr><td><b>user</b></td><td>用户角色/偏好</td><td>"数据科学家，熟悉 Go 不熟 React"</td></tr>
+      <tr><td><b>feedback</b></td><td>纠正和确认</td><td>"不要 mock 数据库""不要估时间"</td></tr>
+      <tr><td><b>project</b></td><td>项目非代码知识</td><td>"merge freeze 3月5日""auth 重写因为合规"</td></tr>
+      <tr><td><b>reference</b></td><td>外部资源指针</td><td>"bugs 在 Linear INGEST""测试文档在 doc/test.md"</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== Part 2: Real Example ===== -->
+<h2>二、真实场景：跨 Session 的记忆流转</h2>
+<p class="sub">以 /opt/mywork/mytest/bl（Blender MMD 转换插件，37 个记忆文件）为例</p>
+
+<div class="pbar" style="background:rgba(88,166,255,0.12); color:var(--blue);">Session 1：工作 + 保存状态</div>
+
+<div class="box">
+  <pre>你: "帮我记录一下，下次重启能接着干"
+
+<span style="color:var(--orange);font-weight:600">Claude 做了三件事（都是 tool_use 主动调用）:</span>
+
+<span style="color:var(--green)">&bull;</span> Write &rarr; Convert_to_MMD_claude/<b>doc/hip_leg_fix_methods.md</b> (170 行)
+  给人看的完整文档，commit 到 git
+
+<span style="color:var(--purple)">&bull;</span> Write &rarr; memory/<b>project_hip_leg_fix_methods.md</b> (70 行)
+  给 LLM 自己看的浓缩版（诊断顺序 + 方法 + 踩坑）
+
+<span style="color:var(--purple)">&bull;</span> Edit &rarr; memory/<b>MEMORY.md</b>
+  追加索引: "[腿胯修复方法清单] &mdash; L4&rarr;L1&rarr;L2&rarr;L3诊断"
+
+<span style="color:var(--blue)">&bull;</span> 系统自动: <b>session jsonl</b> 已在实时写入
+  完整对话流水账，每条消息逐行追加</pre>
+</div>
+
+<div class="note" style="border-left-color:var(--orange);">
+  <b>两个文件的关系:</b> memory/project_hip_leg_fix.md (70行) 和 doc/hip_leg_fix.md (170行) 之间<b>没有显式关联</b>。它们是 LLM 在同一次对话中分别独立写的两个文件。记忆文件不引用文档路径，文档也不知道记忆存在。后续如果改了文档没改记忆（或反过来），<b>系统不会报警</b>。
+</div>
+
+<div class="arrow">&darr; 退出 Claude &darr;</div>
+
+<div class="pbar" style="background:rgba(63,185,80,0.12); color:var(--green);">Session 2：新会话，靠记忆接力</div>
+
+<div class="box">
+  <pre><span style="color:var(--orange);font-weight:600">启动阶段（自动，你不做任何事）:</span>
+  <span class="t t-c">Context</span> 读 CLAUDE.md &rarr; messages[0]           <span style="color:var(--green)">&check; 每轮可见</span>
+  <span class="t t-c">Context</span> 读 git status &rarr; system prompt 末尾  <span style="color:var(--green)">&check; 每轮可见</span>
+  <span class="t t-m">Memory</span>  读 MEMORY.md 索引 &rarr; system prompt    <span style="color:var(--green)">&check; 每轮可见 (36 行标题)</span>
+  <span class="t t-s">Session</span> 上次的 jsonl?                          <span style="color:var(--red)">&cross; 没人读</span>
+
+<span style="color:var(--orange);font-weight:600">你发第一条消息: "接着腿部问题继续"</span>
+  <span class="t t-m">Memory</span>  Sonnet 异步启动 &rarr; 选中 hip_leg_fix
+                                                <span style="color:var(--orange)">&Delta; 内容在<b>下一轮</b>才注入</span>
+
+<span style="color:var(--orange);font-weight:600">LLM 第 1 轮:</span>
+  只看到 MEMORY.md 索引标题 (~5% 信息)
+
+<span style="color:var(--orange);font-weight:600">LLM 第 2 轮:</span>
+  看到记忆内容 70 行浓缩版 (~15% 信息)
+  如果需要更多 &rarr; tool_use: Read doc/hip_leg_fix.md
+  现在看到完整 170 行 (~75% 信息)</pre>
+</div>
+
+<!-- Info Funnel -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--red)"></span>信息漏斗</div>
+  <div class="box">
+    <pre>Session 1 对话全文              <b>100%</b>
+  &boxvr; jsonl (自动保存)             100%  <span style="color:var(--red)">但下次不自动读</span>
+  &boxvr; doc/*.md (LLM 写)            ~60%  <span style="color:var(--orange)">需 LLM 用 Read 主动读</span>
+  &boxur; memory/*.md (LLM 写)         ~30%
+       &boxvr; MEMORY.md 索引           ~5%   <span style="color:var(--green)">每轮自动可见</span>
+       &boxur; Sonnet 选 &le;5 个          ~10%  <span style="color:var(--orange)">下一轮才可见，不一定被选中</span>
+
+Session 2 第一轮 LLM 看到的:    <span style="color:var(--red);font-weight:700">~5%</span>
+Session 2 第二轮 LLM 看到的:    <span style="color:var(--orange);font-weight:700">~15%</span>
+如果 LLM 主动 Read 了 doc:     <span style="color:var(--green);font-weight:700">~75%</span></pre>
+  </div>
+</div>
+
+<!-- ===== Part 3: Two Paths ===== -->
+<h2>三、LLM 与本地交互的两条路径</h2>
+
+<div class="section">
+  <table>
+    <thead>
+      <tr><th style="width:120px">维度</th><th>路径 A: 被动接收</th><th>路径 B: 主动调用</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>谁驱动</td><td>本地代码自动</td><td>LLM 发 tool_use</td></tr>
+      <tr><td>内容</td><td>CLAUDE.md, git status, MEMORY.md, 相关记忆</td><td>任意文件、命令、搜索</td></tr>
+      <tr><td>LLM 感知</td><td>不知过程，只看到结果</td><td>自己决定的</td></tr>
+      <tr><td>权限</td><td>无（系统内部）</td><td>有（hooks &rarr; rules &rarr; 确认）</td></tr>
+      <tr><td>时机</td><td>API 调用<b>前</b></td><td>API 调用<b>后</b></td></tr>
+      <tr><td>Context% 影响</td><td>~10% 固定</td><td>tool_result 累积，增长主力</td></tr>
+    </tbody>
+  </table>
+
+  <p style="margin-top:12px;">记忆横跨两条路径 &mdash; <b>读走被动，写走主动</b>：</p>
+  <table>
+    <thead><tr><th style="width:50px">路径</th><th style="width:180px">操作</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><span class="t t-c">被动</span></td><td>读 MEMORY.md 索引</td><td>启动时注入 system prompt</td></tr>
+      <tr><td><span class="t t-c">被动</span></td><td>Sonnet 选择相关记忆</td><td>每轮异步 sideQuery</td></tr>
+      <tr><td><span class="t t-c">被动</span></td><td>读记忆文件内容</td><td>选中的文件注入<b>下一轮</b>附件</td></tr>
+      <tr><td><span class="t t-s">主动</span></td><td>写记忆 / 更新索引</td><td>LLM 发 tool_use: Write/Edit</td></tr>
+      <tr><td><span class="t t-s">主动</span></td><td>验证记忆准确性</td><td>LLM 发 tool_use: Grep/Read 确认</td></tr>
+      <tr><td><span class="t t-c">被动</span></td><td>后台提取</td><td>fork Agent 自动分析对话写入</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== Part 4: Can and Cannot ===== -->
+<h2>四、系统能做什么和不能做什么</h2>
+
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--green)"></span>能做的</div>
+  <table>
+    <tbody>
+      <tr><td style="width:250px">每轮自动展示记忆索引</td><td>MEMORY.md 注入 system prompt</td></tr>
+      <tr><td>每轮智能选择相关记忆</td><td>Sonnet sideQuery 选 &le;5 个</td></tr>
+      <tr><td>LLM 主动保存记忆</td><td>识别纠正/确认/项目信息后写入</td></tr>
+      <tr><td>后台自动提取记忆</td><td>fork Agent 分析对话 (feature flag)</td></tr>
+      <tr><td>记忆过期警告</td><td>&gt;1天 的记忆附带过期提示</td></tr>
+      <tr><td>按项目隔离</td><td>每个 git root 独立 memory/</td></tr>
+      <tr><td>Session 完整持久化</td><td>jsonl 实时写入，<code>--resume</code> 恢复</td></tr>
+      <tr><td>记忆提升到 CLAUDE.md</td><td><code>/remember</code> 技能</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--red)"></span>不能做的</div>
+  <table>
+    <tbody>
+      <tr><td style="width:250px"><b>不会自动读历史 session jsonl</b></td><td>上次对话的完整信息静躺磁盘，除非 <code>--resume</code></td></tr>
+      <tr><td><b>不会自动从文档生成记忆</b></td><td>doc/*.md 和 memory/*.md 独立写入，无同步</td></tr>
+      <tr><td><b>不会检测记忆与文档漂移</b></td><td>改了文档没改记忆（或反过来）不报警</td></tr>
+      <tr><td><b>不会补回遗漏的记忆</b></td><td>Session 1 漏记了，Session 2 无法发现</td></tr>
+      <tr><td><b>不保证记忆质量</b></td><td>取决于 LLM 当时的判断力</td></tr>
+      <tr><td><b>不保证记忆被选中</b></td><td>37 个中每轮选 5 个，命中率 ~14%</td></tr>
+      <tr><td><b>会话内不刷新 Context</b></td><td>CLAUDE.md memoized，需 /compact 刷新</td></tr>
+      <tr><td><b>索引更新不原子</b></td><td>LLM 可能写了文件但忘了更新 MEMORY.md</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== Part 5: Complete Flow ===== -->
+<h2>五、三次 Session 的完整流转</h2>
+
+<div class="section">
+  <div class="box">
+    <pre><span style="color:var(--blue);font-weight:700">&boxdr;&boxh;&boxh; Session 1: 工作 + 保存状态 &boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxdl;</span>
+<span style="color:var(--blue)">&boxv;</span>                                                         <span style="color:var(--blue)">&boxv;</span>
+<span style="color:var(--blue)">&boxv;</span>  对话中...（信息在进程内存累积）                          <span style="color:var(--blue)">&boxv;</span>
+<span style="color:var(--blue)">&boxv;</span>    &boxvr; <span class="t t-s">Session</span> jsonl 实时写入          <span style="color:var(--text2)">(自动, 100%)</span>     <span style="color:var(--blue)">&boxv;</span>
+<span style="color:var(--blue)">&boxv;</span>    &boxv;                                                   <span style="color:var(--blue)">&boxv;</span>
+<span style="color:var(--blue)">&boxv;</span>  你: "帮我记录一下"                                       <span style="color:var(--blue)">&boxv;</span>
+<span style="color:var(--blue)">&boxv;</span>    &boxvr; <span class="t t-d">Doc</span>    Write &rarr; doc/handoff.md      <span style="color:var(--text2)">(170行)</span>     <span style="color:var(--blue)">&boxv;</span>
+<span style="color:var(--blue)">&boxv;</span>    &boxvr; <span class="t t-m">Memory</span> Write &rarr; memory/handoff.md  <span style="color:var(--text2)">(70行)</span>      <span style="color:var(--blue)">&boxv;</span>
+<span style="color:var(--blue)">&boxv;</span>    &boxur; <span class="t t-m">Memory</span> Edit &rarr; MEMORY.md 追加索引              <span style="color:var(--blue)">&boxv;</span>
+<span style="color:var(--blue)">&boxv;</span>                                                         <span style="color:var(--blue)">&boxv;</span>
+<span style="color:var(--blue)">&boxv;</span>  退出。磁盘上留下: jsonl + memory/ + doc/                <span style="color:var(--blue)">&boxv;</span>
+<span style="color:var(--blue)">&boxur;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxdl;</span>
+                                                          &darr;
+<span style="color:var(--green);font-weight:700">&boxdr;&boxh;&boxh; Session 2: 新会话，靠记忆接力 &boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxdl;</span>
+<span style="color:var(--green)">&boxv;</span>                                                         <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>  启动:                                                   <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>    <span class="t t-c">Context</span> 读 CLAUDE.md          <span style="color:var(--green)">&check; 每轮可见</span>             <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>    <span class="t t-m">Memory</span>  读 MEMORY.md 索引     <span style="color:var(--green)">&check; 每轮可见 (标题)</span>       <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>    <span class="t t-s">Session</span> 上次 jsonl?           <span style="color:var(--red)">&cross; 没人读</span>                <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>                                                         <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>  你: "接着腿部问题继续"                                   <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>    Sonnet 选中 hip_leg_fix &rarr; <span style="color:var(--orange)">下一轮才注入</span>              <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>                                                         <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>  第 1 轮: 只有索引标题 (~5%)                              <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>  第 2 轮: 记忆内容 70 行 (~15%)                           <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>  LLM Read doc/handoff.md: 完整 170 行 (~75%)             <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>                                                         <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>  工作继续... Context% 增长... compact...                 <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxv;</span>  可能写入新的记忆                                        <span style="color:var(--green)">&boxv;</span>
+<span style="color:var(--green)">&boxur;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxdl;</span>
+                                                          &darr;
+<span style="color:var(--purple);font-weight:700">&boxdr;&boxh;&boxh; Session 3: 又一次新会话 &boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxdl;</span>
+<span style="color:var(--purple)">&boxv;</span>                                                         <span style="color:var(--purple)">&boxv;</span>
+<span style="color:var(--purple)">&boxv;</span>  读到 Session 2 新写的记忆（如果有）                      <span style="color:var(--purple)">&boxv;</span>
+<span style="color:var(--purple)">&boxv;</span>  读到更新的 CLAUDE.md（如果改了）                         <span style="color:var(--purple)">&boxv;</span>
+<span style="color:var(--purple)">&boxv;</span>                                                         <span style="color:var(--purple)">&boxv;</span>
+<span style="color:var(--purple)">&boxv;</span>  <span style="color:var(--red)">Session 1 和 2 的 jsonl? 仍然没人读。</span>                  <span style="color:var(--purple)">&boxv;</span>
+<span style="color:var(--purple)">&boxv;</span>  <span style="color:var(--red)">Session 1 中漏记的信息? 永远丢失了。</span>                  <span style="color:var(--purple)">&boxv;</span>
+<span style="color:var(--purple)">&boxur;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxh;&boxdl;</span></pre>
+  </div>
+</div>
+
+<!-- ===== Part 6: Limits ===== -->
+<h2>六、数量限制</h2>
+
+<div class="section">
+  <table>
+    <thead><tr><th style="width:200px">限制项</th><th style="width:100px">上限</th><th>超限后果</th></tr></thead>
+    <tbody>
+      <tr><td>MEMORY.md 索引行数</td><td>200 行</td><td>第 201 行截断，LLM 不知道这些记忆存在</td></tr>
+      <tr><td>MEMORY.md 字节数</td><td>25 KB</td><td>超限截断，追加警告</td></tr>
+      <tr><td>记忆文件扫描数</td><td>200 个</td><td>第 201 个文件不进候选</td></tr>
+      <tr><td>每轮选择数</td><td>&le;5 个</td><td>200 个文件也只读 5 个内容</td></tr>
+      <tr><td>项目隔离</td><td>每个 git root</td><td>换目录 = 另外 200 行</td></tr>
+      <tr><td>过期警告</td><td>&gt;1 天</td><td>附带过期提示，LLM 被要求先验证</td></tr>
+    </tbody>
+  </table>
+  <div class="note">200 行限制是 <b>token 预算</b>：200行 &times; ~15 token/行 &asymp; 3,000 tokens 固定开销。不限制则 1000 条 = 15,000 tokens，光索引就占 200K 窗口的 7.5%。</div>
+</div>
+
+<!-- ===== Part 7: Practical ===== -->
+<h2>七、提高记忆可靠性的实践</h2>
+
+<div class="section">
+  <table>
+    <thead><tr><th style="width:50px">优先级</th><th style="width:220px">做法</th><th>原理</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="t" style="background:rgba(248,81,73,0.2);color:var(--red)">必做</span></td>
+        <td>关键交接信息写到 CLAUDE.md</td>
+        <td>每轮<b>必定可见</b>，不依赖 Sonnet 选择</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(248,81,73,0.2);color:var(--red)">必做</span></td>
+        <td>退出前检查记忆写入成功</td>
+        <td>"看一下你刚写的 memory，索引更新了没"</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(210,153,34,0.2);color:var(--orange)">推荐</span></td>
+        <td>索引里加"必读"标签</td>
+        <td>提高 Sonnet 选中概率（提示词工程，非系统机制）</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(210,153,34,0.2);color:var(--orange)">推荐</span></td>
+        <td>启动时主动提醒</td>
+        <td>"先读 memory 里的 handoff 和 doc/xxx.md"</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(139,148,158,0.2);color:var(--text2)">可选</span></td>
+        <td>重要场景用 <code>--resume</code></td>
+        <td>信息零丢失，代价是 Context% 从历史 token 开始</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(139,148,158,0.2);color:var(--text2)">可选</span></td>
+        <td>定期 <code>/remember</code> 审查</td>
+        <td>把重要记忆提升到 CLAUDE.md</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== Part 8: Concept Map ===== -->
+<h2>八、概念关系图</h2>
+
+<div class="section">
+  <div class="box">
+    <pre>
+                 ┌───────────────────────────────────────┐
+                 &boxv;         <span style="color:var(--blue);font-weight:700">Session</span> (进程内存)            &boxv;
+                 &boxv;  对话消息 &larr;&rarr; LLM 推理 &larr;&rarr; 工具执行  &boxv;
+                 └────┬──────────┬──────────┬────────────┘
+                      &boxv;          &boxv;          &boxv;
+               自动实时写    LLM 主动写   LLM 主动写
+                      &boxv;          &boxv;          &boxv;
+               ┌──────&darr;──┐ ┌─────&darr;────┐ ┌──&darr;──────────┐
+               &boxv; <span style="color:var(--blue)">jsonl</span>    &boxv; &boxv; <span style="color:var(--purple)">memory/</span>   &boxv; &boxv; <span style="color:var(--green)">doc/*.md</span>    &boxv;
+               &boxv; 原始录像 &boxv; &boxv; 浓缩笔记  &boxv; &boxv; 完整报告    &boxv;
+               &boxv; 100%    &boxv; &boxv; ~30%      &boxv; &boxv; ~60%        &boxv;
+               └──────┬──┘ └─────┬────┘ └──┬──────────┘
+                      &boxv;          &boxv;          &boxv;
+               --resume   ┌──────┘          &boxv;
+               手动恢复   &boxv; 自动            &boxv; LLM 用 Read
+                      &boxv;   &boxv;                &boxv; 主动读取
+               ┌──────&darr;───&darr;────────────────&darr;──────────┐
+               &boxv;      <span style="color:var(--green);font-weight:700">下一次 Session</span>                  &boxv;
+               &boxv;                                        &boxv;
+               &boxv;  system prompt: MEMORY.md 索引 (被动)  &boxv;
+               &boxv;  messages[0]: CLAUDE.md (被动)         &boxv;
+               &boxv;  附件: Sonnet 选的记忆 (被动)          &boxv;
+               &boxv;  tool_result: Read doc/ (主动)         &boxv;
+               &boxv;                                        &boxv;
+               &boxv;  <span style="color:var(--red)">jsonl? 不读 (除非 --resume)</span>        &boxv;
+               └────────────────────────────────────────┘</pre>
+  </div>
+</div>
+
+<div class="note" style="border-left-color: var(--orange);">
+  <strong>一句话总结：</strong>Session 是信息的唯一来源，Memory 和 Doc 都从它提炼。但下次 Session 只自动读 Memory（被动路径），不读历史 jsonl。<b>写入记忆的质量</b>决定了跨 Session 的信息保真度 &mdash; 而这取决于 LLM 的判断力，是整个系统最脆弱也最不可 Shim 的环节。
+</div>
+
+</body>
+</html>

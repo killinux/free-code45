@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会话生命周期全景图</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --text2: #8b949e;
+    --blue: #58a6ff; --green: #3fb950; --orange: #d29922;
+    --purple: #bc8cff; --red: #f85149; --cyan: #39d2c0;
+    --yellow: #e3b341; --pink: #f778ba;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', sans-serif; padding: 24px; line-height: 1.5; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  h2 { font-size: 17px; margin-top: 48px; margin-bottom: 4px; }
+  .sub { color: var(--text2); font-size: 13px; margin-bottom: 24px; }
+  .section { margin-bottom: 32px; }
+  .stitle { font-size: 14px; font-weight: 600; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+  /* flow boxes */
+  .flow { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; position: relative; }
+  .flow-title { font-size: 13px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .flow pre { font-size: 12px; line-height: 2; margin: 0; white-space: pre-wrap; color: var(--text); }
+
+  /* tags */
+  .t { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; vertical-align: middle; }
+  .t-ctx { background: rgba(63,185,80,0.18); color: var(--green); }
+  .t-mem { background: rgba(188,140,255,0.18); color: var(--purple); }
+  .t-tool { background: rgba(88,166,255,0.18); color: var(--blue); }
+  .t-prompt { background: rgba(210,153,34,0.18); color: var(--orange); }
+  .t-llm { background: rgba(248,81,73,0.18); color: var(--red); }
+  .t-local { background: rgba(57,210,192,0.18); color: var(--cyan); }
+  .t-hook { background: rgba(247,120,186,0.18); color: var(--pink); }
+  .t-new { background: rgba(227,179,65,0.18); color: var(--yellow); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 4px; }
+  th { text-align: left; padding: 8px 10px; background: var(--card); color: var(--text2); font-weight: 500; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: rgba(88,166,255,0.04); }
+  code { font-family: 'SF Mono', Consolas, monospace; font-size: 12px; color: var(--blue); }
+  .note { color: var(--text2); font-size: 12px; margin-top: 16px; padding: 10px 14px; background: var(--card); border-radius: 6px; border-left: 3px solid var(--blue); }
+
+  .cols { display: flex; gap: 20px; flex-wrap: wrap; }
+  .cols > div { flex: 1; min-width: 300px; }
+
+  .arrow-down { text-align: center; color: var(--text2); font-size: 18px; line-height: 1.2; padding: 4px 0; }
+  .phase-bar { padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<h1>会话生命周期全景图</h1>
+<p class="sub">一次完整对话中所有核心概念的交互时序 &mdash; Context、Memory、Prompt、Tool Use、Hooks、Compaction 如何协作</p>
+
+<!-- ===== Legend ===== -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--text2)"></span>图例</div>
+  <div style="display:flex; flex-wrap:wrap; gap:12px; font-size:12px;">
+    <span><span class="t t-ctx">Context</span> 上下文 (CLAUDE.md, git status)</span>
+    <span><span class="t t-mem">Memory</span> 记忆 (MEMORY.md, 主题文件)</span>
+    <span><span class="t t-prompt">Prompt</span> 提示词 (system/user/tool)</span>
+    <span><span class="t t-tool">Tool</span> 工具调用 (tool_use/tool_result)</span>
+    <span><span class="t t-llm">LLM</span> 模型推理</span>
+    <span><span class="t t-local">Local</span> 本地代码</span>
+    <span><span class="t t-hook">Hook</span> 钩子系统</span>
+    <span><span class="t t-new">未讨论</span> 本次调研未深入的概念</span>
+  </div>
+</div>
+
+<!-- ===== Phase 0: Bootstrap ===== -->
+<div class="phase-bar" style="background:rgba(210,153,34,0.12); color:var(--orange);">Phase 0: 启动引导 (Bootstrap)</div>
+
+<div class="flow">
+  <div class="flow-title"><span class="dot" style="background:var(--orange)"></span>CLI 启动 &rarr; 进入 REPL</div>
+  <pre><span class="t t-local">Local</span> src/entrypoints/cli.tsx &rarr; src/main.tsx
+  &boxvr; 解析 CLI 参数 (Commander.js)
+  &boxvr; 初始化 session ID, auth, settings
+  &boxvr; <span class="t t-new">未讨论</span> OAuth 认证流程 (login, API key 检测)
+  &boxvr; <span class="t t-new">未讨论</span> GrowthBook feature flags 初始化 (88 个 flag)
+  &boxvr; <span class="t t-new">未讨论</span> MCP Server 连接 (如果配置了 MCP)
+  &boxvr; <span class="t t-new">未讨论</span> Plugin 系统加载
+  &boxvr; 注册 43 个工具 (src/tools.ts)
+  &boxvr; 注册 88+ 命令 (src/commands.ts)
+  &boxur; 启动 REPL (src/screens/REPL.tsx, Ink/React 终端 UI)</pre>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<!-- ===== Phase 1: Session Init ===== -->
+<div class="phase-bar" style="background:rgba(63,185,80,0.12); color:var(--green);">Phase 1: 会话初始化 (Session Init) &mdash; 一次性，结果缓存整个会话</div>
+
+<div class="flow">
+  <div class="flow-title"><span class="dot" style="background:var(--green)"></span>构建 System Prompt + Context + Memory 索引</div>
+  <pre><span class="t t-local">Local</span> QueryEngine.submitMessage()
+  &boxvr; fetchSystemPromptParts()
+  &boxv;
+  &boxvr;&horbar;&horbar; <span class="t t-prompt">Prompt</span> getSystemPrompt()  <span style="color:var(--text2)">&larr; 构建完整 system prompt</span>
+  &boxv;   &boxvr; <b>静态段落</b> (scope: global, 跨 org 共享缓存)
+  &boxv;   &boxv;   &boxvr; intro: 角色定义 "You are Claude Code..."
+  &boxv;   &boxv;   &boxvr; system: 工具使用规则, 权限模式, hooks 处理
+  &boxv;   &boxv;   &boxvr; doing_tasks: 代码风格, 简洁原则, 注释规则
+  &boxv;   &boxv;   &boxvr; actions: 危险操作审慎原则
+  &boxv;   &boxv;   &boxvr; using_tools: Bash vs 专用工具选择, 并行调用
+  &boxv;   &boxv;   &boxur; tone_and_style: 表情/格式/输出长度
+  &boxv;   &boxv;   <span style="color:var(--orange)">── __SYSTEM_PROMPT_DYNAMIC_BOUNDARY__ ──</span>
+  &boxv;   &boxur; <b>动态段落</b> (ephemeral, 按会话独立)
+  &boxv;       &boxvr; session_guidance: AskUserQuestion, Agent 指引
+  &boxv;       &boxvr; <span class="t t-mem">Memory</span> memory: loadMemoryPrompt()
+  &boxv;       &boxv;   &boxvr; 记忆行为指令 (4 种类型, 保存/验证规则)
+  &boxv;       &boxv;   &boxur; MEMORY.md 索引内容 (200 行 / 25KB 上限)
+  &boxv;       &boxvr; env_info: 工作目录, git 仓库, 平台, Shell, 模型名
+  &boxv;       &boxvr; language: 语言偏好
+  &boxv;       &boxvr; <span class="t t-new">未讨论</span> mcp_instructions: MCP Server 指令
+  &boxv;       &boxvr; <span class="t t-new">未讨论</span> scratchpad: 暂存目录
+  &boxv;       &boxvr; <span class="t t-new">未讨论</span> frc: Function Result Clearing
+  &boxv;       &boxvr; <span class="t t-new">未讨论</span> token_budget: Token 目标
+  &boxv;       &boxur; <span class="t t-new">未讨论</span> brief: KAIROS 主动模式
+  &boxv;
+  &boxvr;&horbar;&horbar; <span class="t t-ctx">Context</span> getUserContext()  <span style="color:var(--text2)">&larr; memoized, 整个会话不刷新</span>
+  &boxv;   &boxvr; getMemoryFiles() 遍历 CWD&rarr;根目录
+  &boxv;   &boxv;   &boxvr; /etc/claude-code/CLAUDE.md (managed)
+  &boxv;   &boxv;   &boxvr; ~/.claude/CLAUDE.md (user global)
+  &boxv;   &boxv;   &boxvr; ./CLAUDE.md, .claude/CLAUDE.md (project)
+  &boxv;   &boxv;   &boxvr; .claude/rules/*.md (project rules)
+  &boxv;   &boxv;   &boxur; CLAUDE.local.md (local, .gitignored)
+  &boxv;   &boxur; 格式化为 claudeMd 字段 + currentDate + userEmail
+  &boxv;
+  &boxur;&horbar;&horbar; <span class="t t-ctx">Context</span> getSystemContext()  <span style="color:var(--text2)">&larr; memoized, 整个会话不刷新</span>
+      &boxur; git status + branch + recent commits (2000 字符上限)
+
+  <span style="color:var(--text2)">结果: { defaultSystemPrompt, userContext, systemContext }</span>
+  <span style="color:var(--text2)">这三个值在整个会话中<b>不再改变</b>（除非 /compact）</span></pre>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<!-- ===== Phase 2: Turn Loop ===== -->
+<div class="phase-bar" style="background:rgba(88,166,255,0.12); color:var(--blue);">Phase 2: 对话轮循环 (Turn Loop) &mdash; 用户每发一条消息，执行一轮</div>
+
+<div class="flow">
+  <div class="flow-title"><span class="dot" style="background:var(--blue)"></span>T1: 轮次准备</div>
+  <pre><span class="t t-local">Local</span> queryLoop() 开始新一轮
+
+  &boxvr; <span class="t t-mem">Memory</span> startRelevantMemoryPrefetch()  <span style="color:var(--text2)">&larr; 异步启动, 非阻塞</span>
+  &boxv;   &boxvr; <span class="t t-local">Local</span> scanMemoryFiles() 扫描 memory/*.md (上限 200 个)
+  &boxv;   &boxvr; <span class="t t-local">Local</span> 批量读取 frontmatter (name, description, type)
+  &boxv;   &boxur; <span class="t t-llm">LLM</span> Sonnet sideQuery: 选 &le;5 个最相关记忆
+  &boxv;     <span style="color:var(--text2)">(后台运行 5~30s, 不阻塞主流程)</span>
+  &boxv;
+  &boxvr; <span class="t t-prompt">Prompt</span> 组装 system prompt
+  &boxv;   &boxur; appendSystemContext(systemPrompt, systemContext)
+  &boxv;     <span style="color:var(--text2)">systemContext = Phase 1 缓存的 git status</span>
+  &boxv;
+  &boxvr; <span class="t t-ctx">Context</span> 组装 messages
+  &boxv;   &boxur; prependUserContext(messages, userContext)
+  &boxv;     <span style="color:var(--text2)">userContext = Phase 1 缓存的 CLAUDE.md, 包裹在 &lt;system-reminder&gt; 中</span>
+  &boxv;
+  &boxvr; <span class="t t-new">未讨论</span> 计算 attachments (技能发现, 延迟工具, 嵌套记忆)
+  &boxv;
+  &boxur; <span class="t t-prompt">Prompt</span> 组装 tools 参数
+      &boxur; toolToAPISchema() &rarr; 43 个工具的 { name, description, input_schema }</pre>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<div class="flow">
+  <div class="flow-title"><span class="dot" style="background:var(--blue)"></span>T2: API 调用</div>
+  <pre><span class="t t-local">Local</span> services/api/claude.ts
+
+  &boxvr; <span class="t t-prompt">Prompt</span> buildSystemPromptBlocks()  <span style="color:var(--text2)">&larr; system prompt &rarr; 4 个缓存块</span>
+  &boxv;   &boxvr; Block 1: attributionHeader       cache: null
+  &boxv;   &boxvr; Block 2: systemPromptPrefix      cache: { scope: 'org' }
+  &boxv;   &boxvr; Block 3: staticBlocks            cache: { scope: 'global' }
+  &boxv;   &boxur; Block 4: dynamicBlocks           cache: null
+  &boxv;
+  &boxvr; <span class="t t-new">未讨论</span> addCacheBreakpoints()  <span style="color:var(--text2)">&larr; 在 messages 中插入缓存锚点</span>
+  &boxv;
+  &boxur; <span class="t t-llm">LLM</span> anthropic.beta.messages.create({
+      system: [4 个 TextBlockParam],
+      messages: [userContext(CLAUDE.md), ...对话历史, 上轮记忆附件?],
+      tools: [43 个工具定义],
+      model, max_tokens, thinking, stream: true, betas: [12个]
+    })</pre>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<div class="flow">
+  <div class="flow-title"><span class="dot" style="background:var(--red)"></span>T3: LLM 流式响应</div>
+  <pre><span class="t t-llm">LLM</span> 模型推理 &rarr; SSE 流式事件
+
+  &boxvr; <span style="color:var(--purple)">message_start</span>      &rarr; 初始化 usage, model
+  &boxvr; <span style="color:var(--purple)">content_block_start</span> &rarr; 新 block 开始 (text / tool_use / thinking)
+  &boxvr; <span style="color:var(--purple)">content_block_delta</span> &rarr; 增量数据流
+  &boxv;   &boxvr; text_delta         &rarr; 文本片段 (渲染到终端)
+  &boxv;   &boxvr; input_json_delta   &rarr; 工具输入 JSON 片段 (拼接到 input 字符串)
+  &boxv;   &boxur; thinking_delta     &rarr; 思维链片段
+  &boxvr; <span style="color:var(--purple)">content_block_stop</span>  &rarr; block 完成
+  &boxv;   &boxur; tool_use block: normalizeContentFromAPI() 解析 input JSON
+  &boxvr; <span style="color:var(--purple)">message_delta</span>       &rarr; stop_reason + final usage
+  &boxur; <span style="color:var(--purple)">message_stop</span>
+
+  最终 assistant message.content 可能包含:
+  [ text, tool_use, tool_use, thinking, text, tool_use, ... ]</pre>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<!-- ===== Phase 3: Tool Loop ===== -->
+<div class="phase-bar" style="background:rgba(57,210,192,0.12); color:var(--cyan);">Phase 3: 工具执行循环 (Tool Loop) &mdash; 如果 stop_reason == 'tool_use'</div>
+
+<div class="flow">
+  <div class="flow-title"><span class="dot" style="background:var(--cyan)"></span>T4: 工具提取与调度</div>
+  <pre><span class="t t-local">Local</span> query.ts:829
+
+  &boxvr; <span class="t t-tool">Tool</span> 提取 ToolUseBlock[]
+  &boxv;   &boxur; content.filter(c =&gt; c.type === 'tool_use')
+  &boxv;     每个 block: { type, <span style="color:var(--orange)">id</span>, <span style="color:var(--blue)">name</span>, <span style="color:var(--green)">input</span> }
+  &boxv;
+  &boxvr; <span class="t t-tool">Tool</span> toolOrchestration.ts: runTools()
+  &boxv;   &boxvr; 按 isConcurrencySafe() 分批
+  &boxv;   &boxvr; 并发安全工具 &rarr; runToolsConcurrently() (上限 10)
+  &boxv;   &boxv;   <span style="color:var(--text2)">Read, Glob, Grep, WebSearch 等可并发</span>
+  &boxv;   &boxur; 非并发安全 &rarr; runToolsSerially()
+  &boxv;       <span style="color:var(--text2)">Bash, Edit, Write 等需串行</span>
+  &boxv;
+  &boxvr; <span class="t t-new">未讨论</span> StreamingToolExecutor (可选)
+  &boxv;   &boxur; FGTS 模式: 边接收 input_json_delta 边开始执行
+  &boxv;
+  &boxur; 对每个工具调用 runToolUse()</pre>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<div class="flow">
+  <div class="flow-title"><span class="dot" style="background:var(--cyan)"></span>T5: 单工具执行 (per tool_use block)</div>
+  <pre><span class="t t-local">Local</span> toolExecution.ts: runToolUse()
+
+  <span style="color:var(--orange);font-weight:600">Step 1: 输入验证</span>
+  &boxvr; inputSchema.safeParse(input)  <span style="color:var(--text2)">&larr; Zod schema 验证</span>
+  &boxur; tool.validateInput()          <span style="color:var(--text2)">&larr; 工具自定义验证 (可选)</span>
+      如果失败 &rarr; 返回 error tool_result, 跳过执行
+
+  <span style="color:var(--orange);font-weight:600">Step 2: 权限检查</span>
+  &boxvr; <span class="t t-hook">Hook</span> runPreToolUseHooks()  <span style="color:var(--text2)">&larr; 用户自定义 hooks</span>
+  &boxv;   &boxur; hooks 可返回: 允许 / 拒绝 / 修改 input / 停止
+  &boxvr; canUseTool() &rarr; hasPermissionsToUseTool()
+  &boxv;   &boxvr; 检查规则: alwaysAllow / alwaysDeny / alwaysAsk
+  &boxv;   &boxvr; 规则来源: globalSettings, localSettings, projectSettings, flagSettings
+  &boxv;   &boxur; 如果 ask &rarr; 展示权限对话框等待用户确认
+  &boxur; 如果拒绝 &rarr; 返回 error tool_result, 记录 tengu_tool_use_rejected
+
+  <span style="color:var(--orange);font-weight:600">Step 3: 工具执行</span>
+  &boxvr; <span class="t t-tool">Tool</span> tool.call(input, context, canUseTool, assistantMessage, onProgress)
+  &boxv;   <span style="color:var(--text2)">实际执行本地操作: shell 命令 / 文件读写 / 搜索 / MCP 调用 / ...</span>
+  &boxur; 返回 ToolResult { data, newMessages?, contextModifier?, mcpMeta? }
+
+  <span style="color:var(--orange);font-weight:600">Step 4: 结果处理</span>
+  &boxvr; tool.mapToolResultToToolResultBlockParam(data, toolUseID)
+  &boxv;   &boxur; { type: 'tool_result', tool_use_id, content, is_error }
+  &boxvr; applyToolResultBudget()  <span style="color:var(--text2)">&larr; 超过 maxResultSizeChars 则落盘</span>
+  &boxvr; <span class="t t-hook">Hook</span> runPostToolUseHooks()  <span style="color:var(--text2)">&larr; 可修改结果</span>
+  &boxur; 加入 toolResults[] &rarr; 下一次 API 调用的 messages</pre>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<div class="flow">
+  <div class="flow-title"><span class="dot" style="background:var(--cyan)"></span>T6: 循环决策</div>
+  <pre><span class="t t-local">Local</span> query.ts
+
+  &boxvr; <span class="t t-mem">Memory</span> 检查 pendingMemoryPrefetch 是否完成
+  &boxv;   &boxvr; 如果完成: 读取选中的记忆文件内容 + 过期警告
+  &boxv;   &boxur; 作为 attachment 加入 toolResults[]
+  &boxv;     <span style="color:var(--red)"><b>注意: 这些记忆内容在下一次 T2 API 调用时 LLM 才看到</b></span>
+  &boxv;
+  &boxvr; <span class="t t-new">未讨论</span> 检查 auto-compaction 触发条件
+  &boxv;   &boxur; 如果 token 接近上限 &rarr; 自动压缩对话历史
+  &boxv;
+  &boxvr; 检查 stop_reason:
+  &boxv;   &boxvr; <span style="color:var(--blue)">'tool_use'</span>   &rarr; 还有更多工具要调用, <b>回到 T1</b>
+  &boxv;   &boxvr; <span style="color:var(--green)">'end_turn'</span>   &rarr; LLM 完成回答, <b>进入 T7</b>
+  &boxv;   &boxvr; <span style="color:var(--orange)">'max_tokens'</span> &rarr; 输出截断, 可能自动恢复
+  &boxv;   &boxur; <span style="color:var(--red)">budget exceeded / max turns</span> &rarr; 强制结束
+  &boxv;
+  &boxur; 如果继续循环: 回到 T1 (Context/systemPrompt 不变, 仅 messages 更新)</pre>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<!-- ===== Phase 4: Turn End ===== -->
+<div class="phase-bar" style="background:rgba(188,140,255,0.12); color:var(--purple);">Phase 4: 轮次结束 (Turn End)</div>
+
+<div class="flow">
+  <div class="flow-title"><span class="dot" style="background:var(--purple)"></span>T7: 后处理</div>
+  <pre><span class="t t-local">Local</span> 轮次收尾
+
+  &boxvr; <span class="t t-mem">Memory</span> 后台记忆提取 (如果 feature 启用)
+  &boxv;   &boxvr; fork 独立 Agent (共享 prompt cache)
+  &boxv;   &boxvr; <span class="t t-llm">LLM</span> 分析最近 N 条消息, 提取可保存事实
+  &boxv;   &boxur; <span class="t t-tool">Tool</span> Write/Edit 写入 memory/*.md + 更新 MEMORY.md
+  &boxv;     <span style="color:var(--text2)">受限权限: 仅允许写入记忆目录</span>
+  &boxv;
+  &boxvr; <span class="t t-new">未讨论</span> 费用追踪
+  &boxv;   &boxur; cost-tracker: 累计 input/output/cache tokens &rarr; USD
+  &boxv;
+  &boxvr; <span class="t t-new">未讨论</span> 遥测上报 (已被 free-code45 剥离)
+  &boxv;
+  &boxur; 等待用户下一条输入 &rarr; 回到 Phase 2 (新一轮)</pre>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<!-- ===== Phase 5: Special Events ===== -->
+<div class="phase-bar" style="background:rgba(248,81,73,0.12); color:var(--red);">Phase 5: 特殊事件 (中断正常流程)</div>
+
+<div class="flow">
+  <div class="flow-title"><span class="dot" style="background:var(--red)"></span>可能发生的特殊事件</div>
+  <pre><span class="t t-new">未讨论</span> <b>/compact</b> — 对话压缩
+  &boxvr; autocompact() 或用户手动 /compact
+  &boxvr; 压缩对话历史 (保留 system prompt, 摘要替换旧消息)
+  &boxvr; resetGetMemoryFilesCache('compact') <span style="color:var(--text2)">&larr; 清除 CLAUDE.md 缓存</span>
+  &boxur; 下一轮重新加载 CLAUDE.md (唯一的会话内刷新机制)
+
+<span class="t t-new">未讨论</span> <b>子 Agent 启动</b> — AgentTool.call()
+  &boxvr; 创建新 QueryEngine 实例 (独立上下文)
+  &boxvr; customSystemPrompt 替换 / appendSystemPrompt 追加
+  &boxvr; 子 Agent 有独立的 Phase 1-4 循环
+  &boxur; 子 Agent 结果作为 tool_result 返回给父 Agent
+
+<span class="t t-new">未讨论</span> <b>错误与重试</b> — withRetry()
+  &boxvr; 429 限流 &rarr; 指数退避重试
+  &boxvr; 529 过载 &rarr; 等待重试
+  &boxvr; 5xx 服务错误 &rarr; 重试
+  &boxvr; 认证过期 &rarr; 刷新 token
+  &boxur; prompt-too-long &rarr; 触发 auto-compact
+
+<span class="t t-new">未讨论</span> <b>流式超时</b>
+  &boxur; 流式响应超时 &rarr; 回退到 queryModelWithoutStreaming()
+
+<span class="t t-new">未讨论</span> <b>权限拒绝</b>
+  &boxvr; 用户拒绝工具权限 &rarr; error tool_result 返回给 LLM
+  &boxur; LLM 收到拒绝后调整策略 (换工具或询问用户)</pre>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<!-- ===== Phase 6: Session End ===== -->
+<div class="phase-bar" style="background:rgba(139,148,158,0.12); color:var(--text2);">Phase 6: 会话结束</div>
+
+<div class="flow">
+  <div class="flow-title"><span class="dot" style="background:var(--text2)"></span>会话终止</div>
+  <pre><span class="t t-local">Local</span> 会话结束
+  &boxvr; 用户退出 (Ctrl+C, /exit, 关闭终端)
+  &boxvr; 所有 memoize 缓存销毁
+  &boxvr; 记忆文件保留在磁盘 (跨会话持久)
+  &boxvr; CLAUDE.md 保留在磁盘 (跨会话持久)
+  &boxur; 下次启动 &rarr; 回到 Phase 0, 全部重建</pre>
+</div>
+
+<!-- ===== Interaction Map ===== -->
+<h2>核心概念交互关系</h2>
+<p class="sub">所有概念如何连接在一起</p>
+
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--blue)"></span>概念交互矩阵</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:130px">A &rarr; B</th>
+        <th>System Prompt</th>
+        <th>Context</th>
+        <th>Memory</th>
+        <th>Tool Use</th>
+        <th>Hooks</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>System Prompt</b></td>
+        <td style="color:var(--text2)">&mdash;</td>
+        <td>systemContext 追加到末尾</td>
+        <td>MEMORY.md 索引嵌入 memory section</td>
+        <td>定义工具使用规则和风格</td>
+        <td>告诉 LLM hooks 存在</td>
+      </tr>
+      <tr>
+        <td><b>Context</b></td>
+        <td>CLAUDE.md 作为 messages[0] 注入</td>
+        <td style="color:var(--text2)">&mdash;</td>
+        <td>CLAUDE.md 和 MEMORY.md 分离但互补</td>
+        <td>CLAUDE.md 影响 LLM 工具调用行为</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><b>Memory</b></td>
+        <td>记忆指令嵌入 system prompt</td>
+        <td>/remember 可提升记忆到 CLAUDE.md</td>
+        <td style="color:var(--text2)">&mdash;</td>
+        <td>LLM 用 Write/Edit 写记忆; 用 Grep 验证记忆</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><b>Tool Use</b></td>
+        <td>tool schema 通过 tools 参数传递</td>
+        <td>工具修改文件不刷新 Context 缓存</td>
+        <td>工具写入新记忆 &rarr; 下轮 Sonnet 可选</td>
+        <td style="color:var(--text2)">&mdash;</td>
+        <td>Pre/PostToolUse hooks 包裹每次执行</td>
+      </tr>
+      <tr>
+        <td><b>Hooks</b></td>
+        <td>&mdash;</td>
+        <td>&mdash;</td>
+        <td>&mdash;</td>
+        <td>可修改工具 input/output, 控制权限</td>
+        <td style="color:var(--text2)">&mdash;</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== Missed Concepts ===== -->
+<h2>本次调研未深入的概念</h2>
+<p class="sub">标记为 <span class="t t-new">未讨论</span> 的部分，建议后续深入</p>
+
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--yellow)"></span>待深入概念清单</div>
+  <table>
+    <thead>
+      <tr><th style="width:60px">优先级</th><th style="width:200px">概念</th><th style="width:200px">关键文件</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="t" style="background:rgba(248,81,73,0.2);color:var(--red)">高</span></td>
+        <td>Auto-Compaction（自动压缩）</td>
+        <td><code>query.ts</code>, <code>compaction/</code></td>
+        <td>对话接近上下文窗口时自动摘要压缩。直接影响 Context 和 Memory 的可见性</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(248,81,73,0.2);color:var(--red)">高</span></td>
+        <td>Hooks 系统</td>
+        <td><code>hooks/</code>, <code>toolExecution.ts</code></td>
+        <td>PreToolUse / PostToolUse / PermissionDenied hooks。用户可自定义 shell 命令拦截工具调用</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(248,81,73,0.2);color:var(--red)">高</span></td>
+        <td>权限系统完整规则</td>
+        <td><code>utils/permissions/</code></td>
+        <td>allow/deny/ask 规则匹配、YOLO 分类器、来源优先级</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(210,153,34,0.2);color:var(--orange)">中</span></td>
+        <td>MCP (Model Context Protocol)</td>
+        <td><code>services/mcp/</code>, <code>tools/MCPTool/</code></td>
+        <td>外部工具服务器协议。MCP 指令注入 system prompt，MCP 工具混入 tools 参数</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(210,153,34,0.2);color:var(--orange)">中</span></td>
+        <td>GrowthBook Feature Flags</td>
+        <td><code>services/analytics/growthbook.ts</code></td>
+        <td>88 个运行时 feature gate，控制 beta 能力、缓存策略、记忆提取等。编译期 flag 见 FEATURES.md</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(210,153,34,0.2);color:var(--orange)">中</span></td>
+        <td>子 Agent 生命周期</td>
+        <td><code>tools/AgentTool/</code>, <code>QueryEngine.ts</code></td>
+        <td>子 Agent 有独立的 system prompt / context / 工具循环。prompt 可替换/追加</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(210,153,34,0.2);color:var(--orange)">中</span></td>
+        <td>Function Result Clearing (FRC)</td>
+        <td><code>prompts.ts</code> frc section</td>
+        <td>自动清理历史 tool_result 内容以节省上下文窗口。影响 LLM 对历史操作的感知</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(139,148,158,0.2);color:var(--text2)">低</span></td>
+        <td>IDE Bridge 模式</td>
+        <td><code>bridge/</code></td>
+        <td>VS Code / JetBrains 集成，通过消息桥接与 IDE 通信</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(139,148,158,0.2);color:var(--text2)">低</span></td>
+        <td>Voice 输入</td>
+        <td><code>voice/</code></td>
+        <td>语音输入处理和转录</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(139,148,158,0.2);color:var(--text2)">低</span></td>
+        <td>Background Tasks</td>
+        <td><code>tasks/</code></td>
+        <td>后台任务管理（TaskCreate/Get/List/Update/Stop）</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(139,148,158,0.2);color:var(--text2)">低</span></td>
+        <td>Plugin 系统</td>
+        <td><code>plugins/</code></td>
+        <td>外部插件加载和执行</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(139,148,158,0.2);color:var(--text2)">低</span></td>
+        <td>Worktree 隔离</td>
+        <td><code>tools/EnterWorktreeTool/</code></td>
+        <td>git worktree 创建隔离工作环境，子 Agent 在独立分支工作</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(139,148,158,0.2);color:var(--text2)">低</span></td>
+        <td>Scratchpad 暂存</td>
+        <td>prompts.ts scratchpad section</td>
+        <td>临时文件目录，LLM 可自由读写用于中间计算</td>
+      </tr>
+      <tr>
+        <td><span class="t" style="background:rgba(139,148,158,0.2);color:var(--text2)">低</span></td>
+        <td>KAIROS / 主动模式</td>
+        <td>prompts.ts brief section</td>
+        <td>自主工作模式，LLM 用 Sleep 工具 pacing，append-only daily logs</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== Single-Turn Swimlane ===== -->
+<h2>单轮对话泳道图</h2>
+<p class="sub">一轮对话中，本地代码、主模型 LLM、Sonnet 小模型、磁盘各自在做什么</p>
+
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--cyan)"></span>四通道并行时序</div>
+  <div style="overflow-x:auto;">
+  <table style="font-size:12px;">
+    <thead>
+      <tr>
+        <th style="width:60px">时刻</th>
+        <th style="width:220px"><span class="t t-local">Local</span> 本地代码</th>
+        <th style="width:220px"><span class="t t-llm">LLM</span> 主模型</th>
+        <th style="width:180px"><span class="t t-mem">Sonnet</span> 小模型</th>
+        <th style="width:160px">磁盘 I/O</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>T1.0</td>
+        <td>queryLoop() 开始</td>
+        <td style="color:var(--text2)">idle</td>
+        <td style="color:var(--text2)">idle</td>
+        <td style="color:var(--text2)">&mdash;</td>
+      </tr>
+      <tr>
+        <td>T1.1</td>
+        <td>启动 memory prefetch</td>
+        <td style="color:var(--text2)">idle</td>
+        <td style="background:rgba(188,140,255,0.08)">开始选择相关记忆...</td>
+        <td>读 memory/*.md frontmatter</td>
+      </tr>
+      <tr>
+        <td>T1.2</td>
+        <td>组装 system + messages + tools</td>
+        <td style="color:var(--text2)">idle</td>
+        <td style="background:rgba(188,140,255,0.08)">Sonnet 推理中...</td>
+        <td style="color:var(--text2)">&mdash;</td>
+      </tr>
+      <tr>
+        <td>T2.0</td>
+        <td>发送 API 请求</td>
+        <td style="background:rgba(248,81,73,0.08)">接收请求, 开始推理</td>
+        <td style="background:rgba(188,140,255,0.08)">Sonnet 推理中...</td>
+        <td style="color:var(--text2)">&mdash;</td>
+      </tr>
+      <tr>
+        <td>T3.0</td>
+        <td>接收 SSE 流</td>
+        <td style="background:rgba(248,81,73,0.08)">流式输出 text + tool_use</td>
+        <td style="background:rgba(188,140,255,0.08)">Sonnet 返回结果</td>
+        <td style="color:var(--text2)">&mdash;</td>
+      </tr>
+      <tr>
+        <td>T4.0</td>
+        <td>提取 tool_use blocks</td>
+        <td style="color:var(--text2)">等待 tool_result</td>
+        <td style="color:var(--text2)">idle (已完成)</td>
+        <td style="color:var(--text2)">&mdash;</td>
+      </tr>
+      <tr>
+        <td>T5.0</td>
+        <td style="background:rgba(57,210,192,0.08)">Pre hooks &rarr; 权限检查</td>
+        <td style="color:var(--text2)">等待...</td>
+        <td style="color:var(--text2)">idle</td>
+        <td style="color:var(--text2)">&mdash;</td>
+      </tr>
+      <tr>
+        <td>T5.1</td>
+        <td style="background:rgba(57,210,192,0.08)">tool.call() 执行</td>
+        <td style="color:var(--text2)">等待...</td>
+        <td style="color:var(--text2)">idle</td>
+        <td>读/写文件, 执行命令</td>
+      </tr>
+      <tr>
+        <td>T5.2</td>
+        <td style="background:rgba(57,210,192,0.08)">Post hooks &rarr; 构造 tool_result</td>
+        <td style="color:var(--text2)">等待...</td>
+        <td style="color:var(--text2)">idle</td>
+        <td style="color:var(--text2)">&mdash;</td>
+      </tr>
+      <tr>
+        <td>T6.0</td>
+        <td>消费 memory prefetch 结果</td>
+        <td style="color:var(--text2)">等待...</td>
+        <td style="color:var(--text2)">idle</td>
+        <td>读选中的记忆文件内容</td>
+      </tr>
+      <tr>
+        <td>T6.1</td>
+        <td>tool_result + 记忆附件 &rarr; 回到 T1</td>
+        <td style="color:var(--text2)">&rarr; 下次 API 调用</td>
+        <td style="color:var(--text2)">idle</td>
+        <td style="color:var(--text2)">&mdash;</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<!-- Final Note -->
+<div class="note" style="margin-top:24px;">
+  <strong>阅读指南:</strong><br>
+  &bull; 本图覆盖了会话从启动到结束的 6 个 Phase，以及每个 Phase 中所有核心概念的交互<br>
+  &bull; <span class="t t-new">未讨论</span> 标记的 14 个概念是本次调研未深入的部分，按优先级排列供后续探索<br>
+  &bull; 详细的子系统分析见 <code>doc/llm-usage-analysis.html</code>（LLM 分析 + 对比 + 工具链 + Prompt + Memory + 模型切换风险）
+</div>
+
+</body>
+</html>

@@ -220,7 +220,7 @@ CLAUDE_CONFIG_DIR=~/.claude-kimi:
     "allow": ["Read(*)", "Glob(*)"],
     "ask": ["Edit(*)", "Write(*)", "Bash(*)"],
     "deny": ["Bash(sudo:*)", "Bash(rm -rf:*)", "Read(**/.env)"],
-    "defaultMode": "ask"
+    "defaultMode": "default"
   }
 }</code></pre>
     </div>
@@ -252,7 +252,7 @@ mkdir -p ~/.claude-kimi</code></pre>
     "allow": ["Read(*)", "Glob(*)"],
     "ask": ["Edit(*)", "Write(*)", "Bash(*)"],
     "deny": ["Bash(sudo:*)", "Bash(rm -rf:*)", "Read(**/.env)"],
-    "defaultMode": "ask"
+    "defaultMode": "default"
   }
 }
 EOF
@@ -374,8 +374,31 @@ claude-kimi</code></pre>
   "allow": ["Read(*)", "Glob(*)"],          // 自动允许
   "ask":   ["Edit(*)", "Write(*)", "Bash(*)"], // 每次询问
   "deny":  ["Bash(sudo:*)", "Bash(rm -rf:*)", "Read(**/.env)"], // 禁止
-  "defaultMode": "ask"                      // 未匹配时的默认行为
+  "defaultMode": "default"                   // 未匹配时的默认行为
 }</code></pre>
+
+    <h4>defaultMode 合法值</h4>
+
+    <table>
+        <thead>
+            <tr><th>值</th><th>含义</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>default</code></td><td>标准模式，未匹配的操作按默认策略处理</td></tr>
+            <tr><td><code>acceptEdits</code></td><td>自动接受文件编辑，其他操作仍需确认</td></tr>
+            <tr><td><code>plan</code></td><td>仅分析规划，不执行任何修改</td></tr>
+            <tr><td><code>dontAsk</code></td><td>不询问，按 allow/deny 规则自动处理</td></tr>
+            <tr><td><code>bypassPermissions</code></td><td>跳过所有权限检查（仅限沙箱环境）</td></tr>
+        </tbody>
+    </table>
+
+    <div class="box red">
+        <strong>注意：</strong><code>"ask"</code> 不是合法值！如果写了 <code>"defaultMode": "ask"</code>，
+        整个 settings.json 会被 Zod schema 验证拒绝，导致<strong>所有配置（包括 env 中的 API Key）都不会被加载</strong>，
+        表现为 <code>Not logged in</code>。这是一个常见的踩坑点。
+    </div>
+
+    <h4>权限规则</h4>
 
     <table>
         <thead>
@@ -443,6 +466,21 @@ ln -s ~/.claude/plugins ~/.claude-kimi/plugins</code></pre>
             </tbody>
         </table>
         <p>含 API Key 的配置<strong>不要</strong>放在项目目录中（避免泄露）。</p>
+    </div>
+
+    <h3>Q: 配置了 settings.json 但报 "Not logged in" 怎么办？</h3>
+    <div class="box red">
+        <strong>最常见原因：settings.json 中有字段不合法，导致整个文件被 Zod schema 拒绝。</strong>
+        <p>典型错误：<code>"defaultMode": "ask"</code>（不是合法值，应为 <code>"default"</code>）。</p>
+        <p>当 schema 验证失败时，<strong>整个 settings.json 被丢弃</strong>，包括 <code>env</code> 中的 API Key 和 Base URL，表现为未登录。</p>
+        <p><strong>排查方法：</strong></p>
+        <pre><code># 检查 settings 是否被正确加载
+./cli doctor
+
+# 或直接用环境变量注入测试（绕过 settings.json）
+ANTHROPIC_AUTH_TOKEN="sk-xxx" ANTHROPIC_BASE_URL="https://..." ./cli auth status --text
+
+# 如果环境变量方式正常，说明 settings.json 有格式问题</code></pre>
     </div>
 
     <h3>Q: 如何清理某个供应商配置？</h3>

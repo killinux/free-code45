@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context 增长解剖</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --text2: #8b949e;
+    --blue: #58a6ff; --green: #3fb950; --orange: #d29922;
+    --purple: #bc8cff; --red: #f85149; --cyan: #39d2c0;
+    --yellow: #e3b341; --pink: #f778ba;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', sans-serif; padding: 24px; line-height: 1.5; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  h2 { font-size: 17px; margin-top: 40px; margin-bottom: 4px; }
+  .sub { color: var(--text2); font-size: 13px; margin-bottom: 24px; }
+  .section { margin-bottom: 28px; }
+  .stitle { font-size: 14px; font-weight: 600; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .flow { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+  .flow pre { font-size: 12px; line-height: 1.8; margin: 0; white-space: pre-wrap; }
+  .t { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; vertical-align: middle; }
+  .t-fix { background: rgba(63,185,80,0.18); color: var(--green); }
+  .t-grow { background: rgba(248,81,73,0.18); color: var(--red); }
+  .t-spike { background: rgba(210,153,34,0.18); color: var(--orange); }
+  .t-drop { background: rgba(88,166,255,0.18); color: var(--blue); }
+  .t-cache { background: rgba(188,140,255,0.18); color: var(--purple); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 10px; background: var(--card); color: var(--text2); font-weight: 500; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: rgba(88,166,255,0.04); }
+  code { font-family: 'SF Mono', Consolas, monospace; font-size: 12px; color: var(--blue); }
+  .note { color: var(--text2); font-size: 12px; margin-top: 16px; padding: 10px 14px; background: var(--card); border-radius: 6px; border-left: 3px solid var(--blue); }
+
+  /* bar chart */
+  .bar-row { display: flex; align-items: center; margin-bottom: 6px; font-size: 12px; }
+  .bar-label { width: 100px; color: var(--text2); flex-shrink: 0; text-align: right; padding-right: 10px; }
+  .bar-track { flex: 1; height: 18px; background: rgba(255,255,255,0.03); border-radius: 3px; overflow: hidden; display: flex; position: relative; }
+  .bar-seg { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; color: rgba(0,0,0,0.7); min-width: 2px; }
+  .bar-val { width: 60px; color: var(--text2); padding-left: 8px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<h1>Context 增长解剖</h1>
+<p class="sub">claude-hud 的 Context% 增长时，内部的 Context、Memory、Prompt、Tool Result 各自干了什么</p>
+
+<!-- ===== Two Concepts Aligned ===== -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--red)"></span>两个 "Context" 概念对齐</div>
+  <div class="flow">
+    <pre style="color:var(--text);font-size:13px;line-height:2;">
+<b>claude-hud 的 Context%</b> = 整个 API 请求的 token 总量 / 模型上下文窗口大小
+
+它<b>包含</b>了我们讨论过的所有概念:
+
+<span style="color:var(--text2)">┌──────────────────────────────────────────────────────────────────┐</span>
+<span style="color:var(--text2)">│</span>  HUD Context% = <span style="color:var(--green)">System Prompt</span> + <span style="color:var(--cyan)">Tools Schema</span> + <span style="color:var(--blue)">Messages</span>         <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>                                                                <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>  其中 <span style="color:var(--green)">System Prompt</span> 包含:                                      <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>    &bull; 静态行为指令 (角色/风格/安全/工具规则)                     <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>    &bull; <span style="color:var(--purple)">Memory 指令 + MEMORY.md 索引</span>                              <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>    &bull; 环境信息 (cwd, model, date)                               <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>    &bull; <span style="color:var(--orange)">git status (我们讨论的 "System Context")</span>                  <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>                                                                <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>  其中 <span style="color:var(--blue)">Messages</span> 包含:                                            <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>    &bull; <span style="color:var(--orange)">CLAUDE.md 内容 (我们讨论的 "User Context")</span>                <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>    &bull; 用户消息                                                 <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>    &bull; LLM 回复 (text + thinking)                               <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>    &bull; <span style="color:var(--red)">tool_result (工具执行结果 &mdash; 主要增长源)</span>                 <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>    &bull; <span style="color:var(--purple)">Memory 附件 (Sonnet 选出的相关记忆内容)</span>                  <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">│</span>    &bull; system-reminder 附件 (技能/延迟工具等)                    <span style="color:var(--text2)">│</span>
+<span style="color:var(--text2)">└──────────────────────────────────────────────────────────────────┘</span></pre>
+  </div>
+</div>
+
+<!-- ===== Growth Characteristics ===== -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--orange)"></span>各组成部分的增长特性</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:60px">行为</th>
+        <th style="width:180px">组成部分</th>
+        <th style="width:100px">典型 Token 量</th>
+        <th style="width:120px">我们讨论的概念</th>
+        <th>增长规律</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="t t-fix">固定</span></td>
+        <td>静态 System Prompt</td>
+        <td>~4,000</td>
+        <td>Prompt (静态段落)</td>
+        <td>会话内不变。角色定义、工具规则、代码风格等。跨 org 缓存 (cache hit)</td>
+      </tr>
+      <tr>
+        <td><span class="t t-fix">固定</span></td>
+        <td>动态 System Prompt</td>
+        <td>~2,000-6,000</td>
+        <td>Prompt (动态段落) + Memory 指令</td>
+        <td>会话内基本不变。含 MEMORY.md 索引 (~500-2000 token)、env info、MCP 指令等</td>
+      </tr>
+      <tr>
+        <td><span class="t t-fix">固定</span></td>
+        <td>Tools Schema</td>
+        <td>~8,000-12,000</td>
+        <td>Tool Descriptions</td>
+        <td>会话内不变。43 个工具的 name + description + input_schema</td>
+      </tr>
+      <tr>
+        <td><span class="t t-fix">固定</span></td>
+        <td>CLAUDE.md (messages[0])</td>
+        <td>~500-3,000</td>
+        <td>Context (userContext)</td>
+        <td>会话内不变 (memoized)。包裹在 system-reminder 中</td>
+      </tr>
+      <tr>
+        <td><span class="t t-fix">固定</span></td>
+        <td>git status</td>
+        <td>~200-500</td>
+        <td>Context (systemContext)</td>
+        <td>会话内不变 (memoized)。追加在 system prompt 末尾</td>
+      </tr>
+      <tr style="background:rgba(248,81,73,0.03)">
+        <td><span class="t t-grow">增长</span></td>
+        <td><b>用户消息</b></td>
+        <td>每条 ~50-500</td>
+        <td>&mdash;</td>
+        <td><b>线性增长</b>。用户每发一条消息，增加一段</td>
+      </tr>
+      <tr style="background:rgba(248,81,73,0.03)">
+        <td><span class="t t-grow">增长</span></td>
+        <td><b>LLM 回复 (text + thinking)</b></td>
+        <td>每条 ~200-4,000</td>
+        <td>&mdash;</td>
+        <td><b>线性增长</b>。每轮助手回复累积。thinking block 也占 token (但可能被 redact)</td>
+      </tr>
+      <tr style="background:rgba(248,81,73,0.06)">
+        <td><span class="t t-grow">增长</span></td>
+        <td><b>tool_result (工具执行结果)</b></td>
+        <td>每次 ~100-10,000</td>
+        <td>Tool Use 链路</td>
+        <td><b>最大增长源</b>。Bash 输出、文件读取内容、grep 结果。超过 maxResultSizeChars 会落盘截断</td>
+      </tr>
+      <tr>
+        <td><span class="t t-spike">波动</span></td>
+        <td>Memory 附件</td>
+        <td>每轮 0 或 ~500-3,000</td>
+        <td>Memory (相关记忆内容)</td>
+        <td><b>每轮可能出现</b>。Sonnet 选中 &le;5 个记忆文件时注入。不选则为 0</td>
+      </tr>
+      <tr>
+        <td><span class="t t-spike">波动</span></td>
+        <td>system-reminder 附件</td>
+        <td>每轮 0 或 ~100-500</td>
+        <td>Attachments</td>
+        <td>技能发现、延迟工具列表变更时注入。大部分轮次为 0</td>
+      </tr>
+      <tr>
+        <td><span class="t t-drop">下降</span></td>
+        <td>Compaction 压缩</td>
+        <td>减少 50-80%</td>
+        <td>Auto-Compaction</td>
+        <td>接近窗口上限时自动触发。摘要替换旧消息，Context% 大幅下降</td>
+      </tr>
+      <tr>
+        <td><span class="t t-cache">缓存</span></td>
+        <td>Prompt Cache</td>
+        <td>&mdash;</td>
+        <td>Prompt Caching</td>
+        <td>不影响 Context% 大小，但影响<b>计费</b>。cache_read 比 input 便宜 90%</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== Visual Growth Timeline ===== -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--cyan)"></span>Context% 增长时间线（200K 窗口示例）</div>
+
+  <div style="margin-bottom:8px;font-size:11px;color:var(--text2);display:flex;gap:16px;flex-wrap:wrap;">
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--green);border-radius:2px;vertical-align:middle"></span> System Prompt</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--cyan);border-radius:2px;vertical-align:middle"></span> Tools Schema</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--orange);border-radius:2px;vertical-align:middle"></span> Context (CLAUDE.md + git)</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--blue);border-radius:2px;vertical-align:middle"></span> 对话历史 (user + assistant)</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--red);border-radius:2px;vertical-align:middle"></span> Tool Results</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--purple);border-radius:2px;vertical-align:middle"></span> Memory 附件</span>
+  </div>
+
+  <!-- Turn 0 -->
+  <div class="bar-row">
+    <div class="bar-label">会话开始</div>
+    <div class="bar-track">
+      <div class="bar-seg" style="width:3%;background:var(--green)">SP</div>
+      <div class="bar-seg" style="width:5%;background:var(--cyan)">Tools</div>
+      <div class="bar-seg" style="width:1.5%;background:var(--orange)">Ctx</div>
+    </div>
+    <div class="bar-val">~9.5%</div>
+  </div>
+
+  <!-- Turn 1 -->
+  <div class="bar-row">
+    <div class="bar-label">第 1 轮</div>
+    <div class="bar-track">
+      <div class="bar-seg" style="width:3%;background:var(--green)"></div>
+      <div class="bar-seg" style="width:5%;background:var(--cyan)"></div>
+      <div class="bar-seg" style="width:1.5%;background:var(--orange)"></div>
+      <div class="bar-seg" style="width:1%;background:var(--blue)">对话</div>
+      <div class="bar-seg" style="width:2%;background:var(--red)">TR</div>
+    </div>
+    <div class="bar-val">~12.5%</div>
+  </div>
+
+  <!-- Turn 3 -->
+  <div class="bar-row">
+    <div class="bar-label">第 3 轮</div>
+    <div class="bar-track">
+      <div class="bar-seg" style="width:3%;background:var(--green)"></div>
+      <div class="bar-seg" style="width:5%;background:var(--cyan)"></div>
+      <div class="bar-seg" style="width:1.5%;background:var(--orange)"></div>
+      <div class="bar-seg" style="width:4%;background:var(--blue)">对话</div>
+      <div class="bar-seg" style="width:8%;background:var(--red)">Tool Results</div>
+      <div class="bar-seg" style="width:1%;background:var(--purple)">Mem</div>
+    </div>
+    <div class="bar-val">~22.5%</div>
+  </div>
+
+  <!-- Turn 5 -->
+  <div class="bar-row">
+    <div class="bar-label">第 5 轮</div>
+    <div class="bar-track">
+      <div class="bar-seg" style="width:3%;background:var(--green)"></div>
+      <div class="bar-seg" style="width:5%;background:var(--cyan)"></div>
+      <div class="bar-seg" style="width:1.5%;background:var(--orange)"></div>
+      <div class="bar-seg" style="width:7%;background:var(--blue)">对话历史</div>
+      <div class="bar-seg" style="width:18%;background:var(--red)">Tool Results (文件读取, bash 输出)</div>
+      <div class="bar-seg" style="width:1.5%;background:var(--purple)">Mem</div>
+    </div>
+    <div class="bar-val">~36%</div>
+  </div>
+
+  <!-- Turn 10 -->
+  <div class="bar-row">
+    <div class="bar-label">第 10 轮</div>
+    <div class="bar-track">
+      <div class="bar-seg" style="width:3%;background:var(--green)"></div>
+      <div class="bar-seg" style="width:5%;background:var(--cyan)"></div>
+      <div class="bar-seg" style="width:1.5%;background:var(--orange)"></div>
+      <div class="bar-seg" style="width:14%;background:var(--blue)">对话历史</div>
+      <div class="bar-seg" style="width:38%;background:var(--red)">Tool Results (累积)</div>
+      <div class="bar-seg" style="width:2%;background:var(--purple)">Mem</div>
+    </div>
+    <div class="bar-val">~63.5%</div>
+  </div>
+
+  <!-- Turn 15 - near limit -->
+  <div class="bar-row">
+    <div class="bar-label" style="color:var(--red)">第 15 轮</div>
+    <div class="bar-track" style="border:1px solid var(--red);">
+      <div class="bar-seg" style="width:3%;background:var(--green)"></div>
+      <div class="bar-seg" style="width:5%;background:var(--cyan)"></div>
+      <div class="bar-seg" style="width:1.5%;background:var(--orange)"></div>
+      <div class="bar-seg" style="width:20%;background:var(--blue)">对话历史</div>
+      <div class="bar-seg" style="width:55%;background:var(--red)">Tool Results</div>
+      <div class="bar-seg" style="width:2%;background:var(--purple)">M</div>
+    </div>
+    <div class="bar-val" style="color:var(--red)">~86.5% !</div>
+  </div>
+
+  <!-- After compact -->
+  <div class="bar-row">
+    <div class="bar-label" style="color:var(--blue)">/compact 后</div>
+    <div class="bar-track">
+      <div class="bar-seg" style="width:3%;background:var(--green)"></div>
+      <div class="bar-seg" style="width:5%;background:var(--cyan)"></div>
+      <div class="bar-seg" style="width:1.5%;background:var(--orange)"></div>
+      <div class="bar-seg" style="width:3%;background:var(--blue)">摘要</div>
+    </div>
+    <div class="bar-val" style="color:var(--blue)">~12.5%</div>
+  </div>
+</div>
+
+<!-- ===== What Happens at Each Growth Stage ===== -->
+<h2>Context% 增长时，内部发生了什么</h2>
+<p class="sub">每个阶段中 Context、Memory、Tool Use 各自的状态</p>
+
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--blue)"></span>逐阶段详解</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:80px">HUD Context%</th>
+        <th style="width:200px">Context (CLAUDE.md + git)</th>
+        <th style="width:200px">Memory</th>
+        <th>Tool Results + 对话历史</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>~10%</b><br><small>会话刚开始</small></td>
+        <td>
+          <span class="t t-fix">固定</span> 已加载完毕<br>
+          CLAUDE.md 在 messages[0]<br>
+          git status 在 system prompt 末尾<br>
+          <b>已 memoized，后续不变</b>
+        </td>
+        <td>
+          <span class="t t-fix">固定</span> MEMORY.md 索引已注入 system prompt<br>
+          记忆行为指令已注入<br>
+          <b>尚未触发 Sonnet 选择</b>（无用户消息）
+        </td>
+        <td>
+          只有 system prompt + tools schema + CLAUDE.md<br>
+          <b>零对话历史，零 tool results</b>
+        </td>
+      </tr>
+      <tr>
+        <td><b>~15%</b><br><small>第 1 轮</small></td>
+        <td>
+          <span class="t t-fix">不变</span><br>
+          与上一行完全相同
+        </td>
+        <td>
+          <span class="t t-spike">启动</span> Sonnet sideQuery 首次触发<br>
+          异步选择相关记忆<br>
+          <b>本轮 LLM 看不到记忆内容</b><br>
+          （结果在本轮结束后注入下一轮）
+        </td>
+        <td>
+          <span class="t t-grow">+</span> 用户第一条消息 (~100-500 token)<br>
+          <span class="t t-grow">+</span> LLM 回复 (~200-2000 token)<br>
+          <span class="t t-grow">+</span> tool_result (如有工具调用)
+        </td>
+      </tr>
+      <tr>
+        <td><b>~20-30%</b><br><small>第 2-4 轮</small></td>
+        <td>
+          <span class="t t-fix">不变</span>
+        </td>
+        <td>
+          <span class="t t-spike">注入</span> 上一轮 Sonnet 选出的记忆内容<br>
+          作为 system-reminder 附件出现在 messages 中<br>
+          <b>本轮 LLM 可以使用这些记忆</b><br>
+          同时新一轮 Sonnet prefetch 再次启动
+        </td>
+        <td>
+          <span class="t t-grow">持续增长</span><br>
+          多轮对话累积<br>
+          每次工具调用的 tool_result 叠加<br>
+          <b>文件读取和 bash 输出是大头</b>
+        </td>
+      </tr>
+      <tr>
+        <td><b>~40-60%</b><br><small>第 5-10 轮</small></td>
+        <td>
+          <span class="t t-fix">不变</span><br>
+          占比从 ~1.5% 被稀释到 &lt;1%<br>
+          （总量不变，但分母变大）
+        </td>
+        <td>
+          <span class="t t-spike">每轮刷新选择</span><br>
+          Sonnet 可能选不同的记忆<br>
+          新写入的记忆文件可被选中<br>
+          <span class="t t-grow">后台提取 Agent 可能已写入新记忆</span>
+        </td>
+        <td>
+          <span class="t t-grow">tool_result 成为主要占比</span><br>
+          一次 Read 大文件可能 +5000 token<br>
+          一次 Bash 输出可能 +2000 token<br>
+          FRC 可能开始清理旧 tool_result
+        </td>
+      </tr>
+      <tr>
+        <td><b>~70-85%</b><br><small style="color:var(--orange)">接近上限</small></td>
+        <td>
+          <span class="t t-fix">不变</span><br>
+          占比已微乎其微
+        </td>
+        <td>
+          <span class="t t-fix">索引不变</span>（system prompt 中）<br>
+          <span class="t t-spike">附件可能被省略</span><br>
+          （空间紧张时，记忆附件优先级低于 tool_result）
+        </td>
+        <td>
+          <span class="t t-grow">tool_result 占据绝大部分空间</span><br>
+          <b>auto-compaction 即将触发</b><br>
+          applyToolResultBudget() 将大结果落盘
+        </td>
+      </tr>
+      <tr>
+        <td><b>~12%</b><br><small style="color:var(--blue)">/compact 后</small></td>
+        <td>
+          <span class="t t-drop">刷新</span><br>
+          resetGetMemoryFilesCache()<br>
+          <b>下轮重新加载 CLAUDE.md</b><br>
+          （唯一的会话内 Context 刷新点）
+        </td>
+        <td>
+          <span class="t t-drop">缓存清除</span><br>
+          MEMORY.md 索引可能已被 LLM 更新<br>
+          下轮重建 system prompt 会读到新索引<br>
+          Sonnet prefetch 继续正常运作
+        </td>
+        <td>
+          <span class="t t-drop">大幅压缩</span><br>
+          旧消息被摘要替换<br>
+          所有 tool_result 被丢弃<br>
+          只保留摘要 + 最近几条消息
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== Key Insight ===== -->
+<h2>增长公式</h2>
+<p class="sub">Context% 到底是怎么算的</p>
+
+<div class="section">
+  <div class="flow">
+    <pre style="color:var(--text);font-size:13px;line-height:2;">
+<span style="color:var(--orange);font-weight:600">HUD Context% =</span>
+
+  ( <span style="color:var(--green)">system_prompt_tokens</span>    <span style="color:var(--text2)">~6,000-10,000  固定，含记忆指令+MEMORY.md索引+git status</span>
+  + <span style="color:var(--cyan)">tools_schema_tokens</span>     <span style="color:var(--text2)">~8,000-12,000  固定，43 个工具定义</span>
+  + <span style="color:var(--orange)">claude_md_tokens</span>        <span style="color:var(--text2)">~500-3,000     固定 (memoized)</span>
+  + <span style="color:var(--blue)">conversation_tokens</span>     <span style="color:var(--text2)">线性增长，每轮 +300-5,000</span>
+  + <span style="color:var(--red)">tool_result_tokens</span>      <span style="color:var(--text2)">最大变量，每次工具调用 +100-10,000</span>
+  + <span style="color:var(--purple)">memory_attachment_tokens</span> <span style="color:var(--text2)">波动，每轮 0 或 500-3,000</span>
+  )
+  &divide; <span style="color:var(--text)">context_window_size</span>     <span style="color:var(--text2)">200,000 (默认) 或 1,000,000 (1m beta)</span>
+  &times; 100%
+
+<span style="color:var(--orange);font-weight:600">增长速度排序:</span>
+
+  <span style="color:var(--red)">tool_result</span> &gt;&gt; <span style="color:var(--blue)">对话历史</span> &gt; <span style="color:var(--purple)">记忆附件</span> &gt;&gt; <span style="color:var(--green)">system prompt</span> = <span style="color:var(--cyan)">tools</span> = <span style="color:var(--orange)">context</span> (不变)
+
+<span style="color:var(--orange);font-weight:600">关键洞察:</span>
+
+  &bull; 固定开销 (system prompt + tools + CLAUDE.md) 约占 <span style="color:var(--green)">~10%</span> (200K 窗口)
+  &bull; Context 和 Memory 索引是<span style="color:var(--green)">固定开销</span>，不是增长源
+  &bull; <span style="color:var(--red)">tool_result 是增长的主要驱动力</span>（一次 Read 大文件就可能 +5%）
+  &bull; 对话文本本身增长相对缓慢
+  &bull; <span style="color:var(--purple)">Memory 附件</span>每轮波动，但单轮量不大 (~1-2%)
+  &bull; Prompt Cache 不减少 Context%，只减少<span style="color:var(--purple)">费用</span>（cache_read 按正常费率的 10% 计）</pre>
+  </div>
+</div>
+
+<!-- ===== What Controls Growth ===== -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--green)"></span>控制增长的机制</div>
+  <table>
+    <thead>
+      <tr><th style="width:180px">机制</th><th style="width:100px">触发条件</th><th>效果</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>maxResultSizeChars</code></td>
+        <td>单个 tool_result 过大</td>
+        <td>超限部分落盘，只发送预览 + 文件路径。防止单次工具调用撑爆窗口</td>
+      </tr>
+      <tr>
+        <td>Function Result Clearing (FRC)</td>
+        <td>系统自动</td>
+        <td>清理历史轮次的 tool_result 内容，只保留摘要。LLM 被告知内容已清理</td>
+      </tr>
+      <tr>
+        <td>Auto-Compaction</td>
+        <td>Context% 接近上限</td>
+        <td>将对话历史压缩为摘要。Context% 降至 ~10-15%。触发 CLAUDE.md 缓存刷新</td>
+      </tr>
+      <tr>
+        <td><code>/compact</code> 命令</td>
+        <td>用户手动</td>
+        <td>同 Auto-Compaction + 重置 CLAUDE.md memoize 缓存</td>
+      </tr>
+      <tr>
+        <td>Prompt Caching</td>
+        <td>自动</td>
+        <td>不减少 Context%，但减少费用。system prompt + tools schema 首次缓存，后续 cache hit</td>
+      </tr>
+      <tr>
+        <td>1M Context Beta</td>
+        <td>模型支持 + beta flag</td>
+        <td>context_window_size 从 200K 升到 1M。相同 token 量下 Context% 降到 1/5</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="note">
+  <strong>总结:</strong> claude-hud 的 Context% 是<b>整个 API 请求的 token 占用率</b>。我们讨论的 "Context" (CLAUDE.md + git status) 只是其中一个<b>固定开销组件</b>，占 ~1-2%，不随对话增长。真正让 Context% 增长的主力是 <b>tool_result</b>（工具执行结果的累积），其次是<b>对话历史</b>（用户消息 + LLM 回复）。Memory 索引是固定开销；Memory 附件每轮波动 0-2%。当 Context% 接近上限时，auto-compaction 会触发压缩，这是唯一会刷新 CLAUDE.md 缓存的会话内事件。
+</div>
+
+</body>
+</html>

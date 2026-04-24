@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM 与本地交互全景</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --text2: #8b949e;
+    --blue: #58a6ff; --green: #3fb950; --orange: #d29922;
+    --purple: #bc8cff; --red: #f85149; --cyan: #39d2c0;
+    --yellow: #e3b341; --pink: #f778ba;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', sans-serif; padding: 24px; line-height: 1.5; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  h2 { font-size: 17px; margin-top: 44px; margin-bottom: 4px; }
+  .sub { color: var(--text2); font-size: 13px; margin-bottom: 24px; }
+  .section { margin-bottom: 28px; }
+  .stitle { font-size: 14px; font-weight: 600; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .flow { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+  .flow pre { font-size: 12px; line-height: 2; margin: 0; white-space: pre-wrap; }
+  .t { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; vertical-align: middle; }
+  .t-passive { background: rgba(63,185,80,0.18); color: var(--green); }
+  .t-active { background: rgba(88,166,255,0.18); color: var(--blue); }
+  .t-local { background: rgba(57,210,192,0.18); color: var(--cyan); }
+  .t-llm { background: rgba(248,81,73,0.18); color: var(--red); }
+  .t-sonnet { background: rgba(188,140,255,0.18); color: var(--purple); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 10px; background: var(--card); color: var(--text2); font-weight: 500; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: rgba(88,166,255,0.04); }
+  code { font-family: 'SF Mono', Consolas, monospace; font-size: 12px; color: var(--blue); }
+  .note { color: var(--text2); font-size: 12px; margin-top: 16px; padding: 10px 14px; background: var(--card); border-radius: 6px; border-left: 3px solid var(--blue); }
+  .arrow-down { text-align: center; color: var(--text2); font-size: 18px; line-height: 1.2; padding: 4px 0; }
+  .phase-bar { padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<h1>LLM 与本地交互全景</h1>
+<p class="sub">LLM 不能直接碰本地文件。它对本地的全部控制力，通过两条路径实现：被动接收（本地塞给它）和主动调用（它发 tool_use）</p>
+
+<!-- ===== Core Principle ===== -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--red)"></span>核心原则</div>
+  <div class="flow">
+    <pre style="font-size:14px;line-height:2;color:var(--text);">LLM 是一个<span style="color:var(--red);font-weight:700">纯文本推理引擎</span>，没有文件系统访问权。
+
+它与本地的全部交互只有两条路径：
+
+  <span class="t t-passive">被动</span>  本地代码读好内容，塞进 API 请求 → LLM 打开"信封"就看到了
+  <span class="t t-active">主动</span>  LLM 输出一段 JSON (tool_use) → 本地代码代替它执行 → 结果喂回去</pre>
+  </div>
+</div>
+
+<!-- ===== Two Paths Overview ===== -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--orange)"></span>两条路径对比</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:120px">维度</th>
+        <th><span class="t t-passive">路径 A: 被动接收</span></th>
+        <th><span class="t t-active">路径 B: 主动调用</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>谁驱动</td><td>本地代码自动</td><td>LLM 主动发 tool_use</td></tr>
+      <tr><td>LLM 感知</td><td>不知道读取过程，只看到结果</td><td>自己决定调什么工具、传什么参数</td></tr>
+      <tr><td>需要 tool_use?</td><td><b>不需要</b></td><td><b>需要</b></td></tr>
+      <tr><td>权限检查</td><td>无（系统内部操作）</td><td>有（hooks &rarr; rules &rarr; 用户确认）</td></tr>
+      <tr><td>注入位置</td><td>system prompt / messages[0] / 附件</td><td>tool_result（对话历史中）</td></tr>
+      <tr><td>时机</td><td>API 调用<b>前</b></td><td>API 调用<b>后</b>的循环中</td></tr>
+      <tr><td>对 Context% 的影响</td><td>固定开销（~10%，不增长）</td><td>tool_result 累积是<b>增长主力</b></td></tr>
+      <tr><td>读取的内容</td><td>CLAUDE.md, git status, MEMORY.md 索引, 相关记忆</td><td>任意文件、命令输出、搜索结果</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== Path A: Passive ===== -->
+<div class="phase-bar" style="background:rgba(63,185,80,0.12); color:var(--green);">路径 A: 被动接收 &mdash; 本地代码读好，塞进 API 请求</div>
+
+<div class="flow">
+  <div style="font-size:13px; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+    <span class="dot" style="background:var(--green)"></span>Step 0: 在 API 调用前，本地代码自动完成的所有读取
+  </div>
+  <pre><span class="t t-local">本地</span> <b>读 Context — getUserContext()</b>    <span style="color:var(--text2)">memoized, 会话内只执行一次</span>
+  &boxvr; 遍历 CWD &rarr; 根目录，加载所有 CLAUDE.md 文件
+  &boxv;   &boxvr; /etc/claude-code/CLAUDE.md      (managed)
+  &boxv;   &boxvr; ~/.claude/CLAUDE.md              (user global)
+  &boxv;   &boxvr; ./CLAUDE.md, .claude/CLAUDE.md   (project)
+  &boxv;   &boxvr; .claude/rules/*.md               (project rules)
+  &boxv;   &boxur; CLAUDE.local.md                  (local, .gitignored)
+  &boxvr; 格式化 + 包裹 &lt;system-reminder&gt;
+  &boxur; <span style="color:var(--green);font-weight:600">&rarr; 注入 messages[0]（每轮 API 调用都带上）</span>
+
+<span class="t t-local">本地</span> <b>读 Context — getSystemContext()</b>    <span style="color:var(--text2)">memoized, 会话内只执行一次</span>
+  &boxvr; git status + branch + recent commits (截断 2000 字符)
+  &boxur; <span style="color:var(--green);font-weight:600">&rarr; 追加到 system prompt 末尾（每轮 API 调用都带上）</span>
+
+<span class="t t-local">本地</span> <b>读 Memory 索引 — loadMemoryPrompt()</b>    <span style="color:var(--text2)">会话首次加载</span>
+  &boxvr; 读取 ~/.claude/projects/&lt;project&gt;/memory/MEMORY.md
+  &boxvr; 截断到 200 行 / 25KB
+  &boxvr; 拼接记忆行为指令（4 种类型 + 保存/验证规则）
+  &boxur; <span style="color:var(--green);font-weight:600">&rarr; 注入 system prompt 的 memory section（每轮 API 调用都带上）</span>
+
+<span class="t t-local">本地</span> + <span class="t t-sonnet">Sonnet</span> <b>读 Memory 内容 — findRelevantMemories()</b>    <span style="color:var(--text2)">每轮异步</span>
+  &boxvr; <span class="t t-local">本地</span> scanMemoryFiles() 扫描 memory/*.md (上限 200 个)
+  &boxvr; <span class="t t-local">本地</span> 批量读取 frontmatter (name, description, type)
+  &boxvr; <span class="t t-sonnet">Sonnet</span> sideQuery: 从候选中选 &le;5 个最相关记忆
+  &boxvr; <span class="t t-local">本地</span> 读取选中文件内容 + 计算过期天数 + 过期警告
+  &boxur; <span style="color:var(--green);font-weight:600">&rarr; 注入<b>下一轮</b> messages 附件 (system-reminder)</span>
+
+<span class="t t-local">本地</span> <b>读 Tool Descriptions — toolToAPISchema()</b>
+  &boxvr; 43 个工具的 tool.prompt() 生成 description
+  &boxvr; Zod schema &rarr; JSON Schema
+  &boxur; <span style="color:var(--green);font-weight:600">&rarr; 注入 API 请求的 tools 参数</span>
+
+<span style="color:var(--text2)">────────── 以上全部在 API 调用前完成 ──────────</span>
+<span style="color:var(--text2)">LLM 收到请求时，这些内容已经"在那了"，它不需要做任何事就能看到</span></pre>
+</div>
+
+<!-- What LLM sees -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--purple)"></span>路径 A 注入后，LLM 看到的完整请求</div>
+  <div class="flow">
+    <pre><span style="color:var(--orange);font-weight:600">system:</span> [
+  <span style="color:var(--green)">静态行为指令</span>      &larr; 角色/风格/安全/工具规则 (scope: global)
+  <span style="color:var(--purple)">记忆指令+MEMORY.md索引</span> &larr; 4 种类型定义 + 已有记忆目录
+  <span style="color:var(--cyan)">环境信息</span>            &larr; cwd, shell, OS, model, date
+  <span style="color:var(--orange)">git status</span>          &larr; branch, status, recent commits
+]
+
+<span style="color:var(--orange);font-weight:600">messages:</span> [
+  <span style="color:var(--green)">messages[0]: CLAUDE.md</span>  &larr; 项目指令+全局指令, 包裹在 &lt;system-reminder&gt;
+  <span style="color:var(--purple)">上轮记忆附件</span>          &larr; Sonnet 选出的 &le;5 个记忆文件内容 (如果有)
+  <span style="color:var(--text2)">用户消息...</span>
+  <span style="color:var(--text2)">助手回复...</span>
+  <span style="color:var(--text2)">tool_result...</span>
+]
+
+<span style="color:var(--orange);font-weight:600">tools:</span> [
+  <span style="color:var(--cyan)">43 个工具定义</span>  &larr; name + description + input_schema
+]</pre>
+  </div>
+</div>
+
+<div class="arrow-down">&darr; LLM 开始推理，可能决定调用工具 &darr;</div>
+
+<!-- ===== Path B: Active ===== -->
+<div class="phase-bar" style="background:rgba(88,166,255,0.12); color:var(--blue);">路径 B: 主动调用 &mdash; LLM 发 tool_use，本地代替执行</div>
+
+<div class="flow">
+  <div style="font-size:13px; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+    <span class="dot" style="background:var(--blue)"></span>Step 1-7: tool_use &rarr; 本地执行 &rarr; tool_result 循环
+  </div>
+  <pre><span style="color:var(--accent);font-weight:600">Step 1: LLM 输出 tool_use</span>
+<span class="t t-llm">LLM</span> 流式返回 assistant message，含 tool_use content block:
+  { type: "tool_use", id: "<span style="color:var(--orange)">toolu_01...</span>", name: "<span style="color:var(--blue)">Read</span>", input: { file_path: "/tmp/a.ts" } }
+
+  流式组装过程 (SSE):
+  &boxvr; content_block_start  &rarr; 创建骨架 { id, name, input: "" }
+  &boxvr; content_block_delta  &rarr; input += partial_json (逐片拼接)
+  &boxur; content_block_stop   &rarr; JSON.parse(input) &rarr; 完整对象
+
+<span style="color:var(--accent);font-weight:600">Step 2: 本地提取</span>
+<span class="t t-local">本地</span> query.ts:829
+  &boxvr; content.filter(c =&gt; c.type === 'tool_use')
+  &boxur; 一条 assistant message 可能含多个 tool_use (并行调用)
+
+<span style="color:var(--accent);font-weight:600">Step 3: 输入验证</span>
+<span class="t t-local">本地</span> toolExecution.ts
+  &boxvr; inputSchema.safeParse(input)  &larr; Zod schema 验证
+  &boxvr; tool.validateInput()          &larr; 工具自定义验证 (可选)
+  &boxur; 失败 &rarr; 返回 error tool_result，LLM 收到错误信息
+
+<span style="color:var(--accent);font-weight:600">Step 4: 权限检查</span>
+<span class="t t-local">本地</span> toolExecution.ts + permissions.ts
+  &boxvr; PreToolUse hooks   &larr; 用户自定义 shell 命令拦截
+  &boxvr; hasPermissionsToUseTool()
+  &boxv;   &boxvr; alwaysAllow rules  &rarr; 直接放行
+  &boxv;   &boxvr; alwaysDeny rules   &rarr; 直接拒绝
+  &boxv;   &boxur; alwaysAsk rules    &rarr; 弹出对话框等用户确认
+  &boxur; 拒绝 &rarr; error tool_result 返回给 LLM，LLM 调整策略
+
+<span style="color:var(--accent);font-weight:600">Step 5: 本地执行</span>
+<span class="t t-local">本地</span> tool.call(input, context)
+  &boxvr; 调度: isConcurrencySafe() ? 并发(上限10) : 串行
+  &boxur; 实际操作:
+      Read   &rarr; fs.readFile()          读文件内容
+      Write  &rarr; fs.writeFile()         创建/覆写文件
+      Edit   &rarr; 字符串替换后写回       精确编辑
+      Bash   &rarr; child_process.exec()   执行 shell 命令
+      Grep   &rarr; ripgrep 搜索           文件内容正则搜索
+      Glob   &rarr; 文件名模式匹配         查找文件
+      Agent  &rarr; fork QueryEngine       启动子 Agent
+      MCP    &rarr; MCP Server 调用        外部工具协议
+
+<span style="color:var(--accent);font-weight:600">Step 6: 构造结果</span>
+<span class="t t-local">本地</span> toolExecution.ts
+  &boxvr; tool.mapToolResultToToolResultBlockParam(data, toolUseID)
+  &boxv;   &rarr; { type: "tool_result", tool_use_id: "toolu_01...",
+  &boxv;        content: "文件内容...", is_error: false }
+  &boxvr; applyToolResultBudget()
+  &boxv;   &rarr; 超过 maxResultSizeChars? 落盘，只发预览+文件路径
+  &boxur; PostToolUse hooks &larr; 可修改结果
+
+<span style="color:var(--accent);font-weight:600">Step 7: 喂回 LLM</span>
+<span class="t t-local">本地</span> query.ts
+  &boxvr; tool_result 加入 messages 数组
+  &boxvr; 下一次 API 调用发送
+  &boxur; LLM 看到结果:
+      &boxvr; stop_reason == 'tool_use'   &rarr; <span style="color:var(--blue)">回到 Step 1（继续循环）</span>
+      &boxur; stop_reason == 'end_turn'   &rarr; <span style="color:var(--green)">完成回答</span></pre>
+  </div>
+</div>
+
+<!-- ===== What Goes Where ===== -->
+<h2>所有本地内容的注入方式一览</h2>
+<p class="sub">每种本地内容走哪条路径、注入到 API 请求的什么位置</p>
+
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--cyan)"></span>注入清单</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:50px">路径</th>
+        <th style="width:170px">本地内容</th>
+        <th style="width:160px">注入位置</th>
+        <th style="width:100px">刷新频率</th>
+        <th style="width:100px">占 Context%</th>
+        <th>说明</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="6" style="background:rgba(63,185,80,0.06); color:var(--green); font-weight:600; font-size:12px; padding:6px 10px;">路径 A: 被动接收（本地塞进请求，无需 tool_use）</td></tr>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>CLAUDE.md 内容</td>
+        <td><code>messages[0]</code> system-reminder</td>
+        <td>会话级 (memoized)</td>
+        <td>~1-2% 固定</td>
+        <td>项目指令 + 全局指令 + 本地覆盖</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>git status</td>
+        <td>system prompt 末尾</td>
+        <td>会话级 (memoized)</td>
+        <td>&lt;0.5% 固定</td>
+        <td>branch, status, recent commits</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>MEMORY.md 索引</td>
+        <td>system prompt memory section</td>
+        <td>会话级</td>
+        <td>~0.5-1% 固定</td>
+        <td>记忆目录，每条一行摘要 (200 行上限)</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>记忆行为指令</td>
+        <td>system prompt memory section</td>
+        <td>会话级</td>
+        <td>~1% 固定</td>
+        <td>4 种记忆类型定义 + 保存/读取/验证规则</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>相关记忆内容 (&le;5 个)</td>
+        <td>messages 附件 (system-reminder)</td>
+        <td><b>每轮</b> Sonnet 重选</td>
+        <td>0~2% 波动</td>
+        <td>Sonnet sideQuery 选出的记忆文件内容</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>工具定义 (43 个)</td>
+        <td>API <code>tools</code> 参数</td>
+        <td>会话级</td>
+        <td>~5% 固定</td>
+        <td>name + description + input_schema</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>静态 System Prompt</td>
+        <td>API <code>system</code> 参数</td>
+        <td>会话级</td>
+        <td>~2% 固定</td>
+        <td>角色/风格/安全/工具规则 (6 段)</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>动态 System Prompt</td>
+        <td>API <code>system</code> 参数</td>
+        <td>会话级</td>
+        <td>~1-2% 固定</td>
+        <td>env info, MCP, scratchpad, FRC 等 (11 段)</td>
+      </tr>
+
+      <tr><td colspan="6" style="background:rgba(88,166,255,0.06); color:var(--blue); font-weight:600; font-size:12px; padding:6px 10px;">路径 B: 主动调用（LLM 发 tool_use，本地代执行）</td></tr>
+      <tr>
+        <td><span class="t t-active">主动</span></td>
+        <td>文件读取 (Read)</td>
+        <td>tool_result 在 messages 中</td>
+        <td>LLM 按需</td>
+        <td><span style="color:var(--red)">每次 +0.5-5%</span></td>
+        <td>LLM 决定读哪个文件。大文件是 Context% 增长大头</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">主动</span></td>
+        <td>命令执行 (Bash)</td>
+        <td>tool_result 在 messages 中</td>
+        <td>LLM 按需</td>
+        <td><span style="color:var(--red)">每次 +0.1-3%</span></td>
+        <td>命令输出累积。长输出自动落盘截断</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">主动</span></td>
+        <td>搜索结果 (Grep/Glob)</td>
+        <td>tool_result 在 messages 中</td>
+        <td>LLM 按需</td>
+        <td><span style="color:var(--red)">每次 +0.1-2%</span></td>
+        <td>搜索结果行数可控 (head_limit)</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">主动</span></td>
+        <td>文件写入 (Write/Edit)</td>
+        <td>tool_result 在 messages 中</td>
+        <td>LLM 按需</td>
+        <td>每次 +0.05%</td>
+        <td>结果很小 ("File written successfully")</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">主动</span></td>
+        <td>记忆写入 (Write/Edit)</td>
+        <td>tool_result 在 messages 中</td>
+        <td>LLM 决定保存时</td>
+        <td>每次 +0.05%</td>
+        <td>写 memory/*.md + 更新 MEMORY.md 索引</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">主动</span></td>
+        <td>子 Agent (Agent)</td>
+        <td>tool_result 在 messages 中</td>
+        <td>LLM 按需</td>
+        <td>每次 +0.5-3%</td>
+        <td>子 Agent 有独立上下文，结果摘要返回</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">主动</span></td>
+        <td>Web (WebSearch/Fetch)</td>
+        <td>tool_result 在 messages 中</td>
+        <td>LLM 按需</td>
+        <td>每次 +0.5-3%</td>
+        <td>网页内容可能很长</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">主动</span></td>
+        <td>MCP 工具</td>
+        <td>tool_result 在 messages 中</td>
+        <td>LLM 按需</td>
+        <td>不定</td>
+        <td>外部工具服务器返回结果</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== Memory Read vs Write ===== -->
+<h2>记忆的读与写分别走哪条路径</h2>
+<p class="sub">记忆系统横跨两条路径 &mdash; 读走被动，写走主动</p>
+
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--purple)"></span>记忆操作路径</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:50px">路径</th>
+        <th style="width:140px">操作</th>
+        <th style="width:100px">执行者</th>
+        <th>过程</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>读 MEMORY.md 索引</td>
+        <td><span class="t t-local">本地</span></td>
+        <td>会话启动时读取，注入 system prompt。LLM 每轮都能看到索引</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>选择相关记忆</td>
+        <td><span class="t t-sonnet">Sonnet</span></td>
+        <td>每轮异步 sideQuery，从 frontmatter 列表中选 &le;5 个文件</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>读记忆文件内容</td>
+        <td><span class="t t-local">本地</span></td>
+        <td>读取 Sonnet 选中的文件，截断 + 过期警告，注入下一轮附件</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">主动</span></td>
+        <td>写记忆文件</td>
+        <td><span class="t t-llm">LLM</span></td>
+        <td>LLM 发 tool_use: Write &rarr; 本地写 memory/*.md</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">主动</span></td>
+        <td>更新 MEMORY.md 索引</td>
+        <td><span class="t t-llm">LLM</span></td>
+        <td>LLM 发 tool_use: Edit &rarr; 本地编辑 MEMORY.md 追加条目</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">主动</span></td>
+        <td>验证记忆准确性</td>
+        <td><span class="t t-llm">LLM</span></td>
+        <td>LLM 发 tool_use: Grep/Read &rarr; 确认记忆中的文件/函数是否仍存在</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">被动</span></td>
+        <td>后台提取</td>
+        <td><span class="t t-local">本地</span> + <span class="t t-llm">LLM</span></td>
+        <td>轮次结束后 fork Agent，分析对话，自动写入新记忆（受限权限）</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== Context% Growth Attribution ===== -->
+<h2>Context% 增长归因</h2>
+<p class="sub">HUD 的 Context% 增长时，哪条路径贡献了多少</p>
+
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--red)"></span>增长归因</div>
+  <div class="flow">
+    <pre style="font-size:13px;line-height:2;">
+<span style="color:var(--green);font-weight:600">路径 A (被动) 贡献的 Context%：~10% 固定，不增长</span>
+  &boxvr; System Prompt (静态+动态)   ~3-4%
+  &boxvr; Tools Schema               ~5%
+  &boxvr; CLAUDE.md                   ~1-2%
+  &boxvr; git status                  &lt;0.5%
+  &boxvr; MEMORY.md 索引+指令         ~1-2%
+  &boxur; 相关记忆附件                0-2% (每轮波动，不累积)
+
+<span style="color:var(--red);font-weight:600">路径 B (主动) 贡献的 Context%：持续增长，是增长主力</span>
+  &boxvr; tool_result 累积            <span style="color:var(--red)">最大变量，每次 +0.1-5%</span>
+  &boxvr; LLM 回复 (text+thinking)    每轮 +0.1-2%
+  &boxur; 用户消息                    每轮 +0.05-0.3%
+
+<span style="color:var(--blue);font-weight:600">Compact 压缩效果：</span>
+  &boxur; 路径 B 的累积全部清零 &rarr; Context% 从 ~85% 降到 ~12%
+    路径 A 的固定开销保留（重新注入）</pre>
+  </div>
+</div>
+
+<!-- ===== One-Line Summary ===== -->
+<div class="note" style="margin-top:24px; border-left-color: var(--orange);">
+  <strong>一句话总结：</strong><br>
+  LLM 对本地的全部交互分两条路径。<b>路径 A（被动）</b>是本地代码把 CLAUDE.md、git status、Memory 索引和相关记忆塞进 API 请求 — 这是固定开销，占 ~10%，不增长。<b>路径 B（主动）</b>是 LLM 通过 tool_use 驱动本地执行文件读写、命令、搜索 — 这是 Context% 增长的主力，也是 compact 压缩的目标。两条路径共同构成了 LLM 的全部本地感知和操控能力。
+</div>
+
+<!-- ===== Model Capabilities Required ===== -->
+<h2>其他模型要复用这套系统，需要哪些能力</h2>
+<p class="sub">API 格式可以用 Shim 转译，但模型本身的推理能力无法绕过</p>
+
+<!-- Capability Layers -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--red)"></span>能力分层：可适配 vs 不可复制</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:50px">难度</th>
+        <th style="width:180px">能力</th>
+        <th style="width:100px">可否 Shim</th>
+        <th>说明</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="4" style="background:rgba(63,185,80,0.06); color:var(--green); font-weight:600; font-size:12px; padding:6px 10px;">可以通过 Shim/适配层解决（API 格式层面）</td></tr>
+      <tr>
+        <td><span class="t t-passive">易</span></td>
+        <td>Tool Use 格式</td>
+        <td><span style="color:var(--green)">可以</span></td>
+        <td>Anthropic tool_use &harr; OpenAI function_call 双向转换。openclaude 的 openaiShim.ts 已实现</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">易</span></td>
+        <td>流式事件格式</td>
+        <td><span style="color:var(--green)">可以</span></td>
+        <td>OpenAI SSE &rarr; Anthropic SSE 转译</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">易</span></td>
+        <td>消息/System Prompt 格式</td>
+        <td><span style="color:var(--green)">可以</span></td>
+        <td>system 参数 &rarr; messages 合并, content block 结构差异</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">易</span></td>
+        <td>Stop Reason / Usage 映射</td>
+        <td><span style="color:var(--green)">可以</span></td>
+        <td>end_turn&rarr;stop, tool_use&rarr;tool_calls 等</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">中</span></td>
+        <td>Prompt Cache</td>
+        <td><span style="color:var(--orange)">降级可用</span></td>
+        <td>其他 Provider 有不同缓存机制或没有。忽略 cache_control 即可，只是更贵更慢</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">中</span></td>
+        <td>Token 计数 API</td>
+        <td><span style="color:var(--orange)">降级可用</span></td>
+        <td>回退到启发式估算 (4 bytes/token)，上下文管理精度下降</td>
+      </tr>
+      <tr>
+        <td><span class="t t-passive">中</span></td>
+        <td>Extended Thinking</td>
+        <td><span style="color:var(--orange)">降级可用</span></td>
+        <td>没有 thinking 块。部分模型有 reasoning 输出 (o1/o3) 但格式不同</td>
+      </tr>
+
+      <tr><td colspan="4" style="background:rgba(210,153,34,0.06); color:var(--orange); font-weight:600; font-size:12px; padding:6px 10px;">需要模型本身具备的推理能力（不可 Shim，取决于模型智力）</td></tr>
+      <tr>
+        <td><span class="t t-active">硬</span></td>
+        <td>工具选择判断力</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>从 43 个工具中选对的。何时用 Read vs Grep，何时 spawn Agent vs 直接搜索。需要语义理解</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">硬</span></td>
+        <td>并行 vs 串行决策</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>哪些工具调用可并行，哪些有因果依赖。"Read before Edit" 等规则需要逻辑推理</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">硬</span></td>
+        <td>权限拒绝后的适应</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>被拒绝后不能盲目重试，必须推理原因并换方案。需要 theory of mind</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">硬</span></td>
+        <td>错误诊断能力</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>工具返回错误时，区分用户错误/工具错误/模型错误，诊断根因后再重试</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">硬</span></td>
+        <td>50-80 条规则同时遵守</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>system prompt 含 50+ 条并行约束（安全/风格/git/注释/scope），需同时跟踪上下文化应用</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">硬</span></td>
+        <td>代码风格匹配</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>读现有代码 &rarr; 匹配缩进/命名/导入风格 &rarr; 生成一致代码。不是套模板能解决的</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">硬</span></td>
+        <td>安全意识</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>写代码时主动避免注入/XSS/CSRF，发现写了不安全代码立即修正</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">硬</span></td>
+        <td>记忆判断力</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>判断何时保存记忆、保存什么类型、是否重复、是否需要验证。需要语用学推理</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">硬</span></td>
+        <td>Compact 摘要质量</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>9 段结构化摘要需要: 保留精确代码片段、文件名行号、用户反馈演变、决策理由</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">硬</span></td>
+        <td>Scope 自律</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>"不要添加未请求的功能" "不要改进相邻代码" — 需要克制扩展冲动的能力</td>
+      </tr>
+      <tr>
+        <td><span class="t t-active">硬</span></td>
+        <td>诚实报告</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>测试失败时如实报告，不声称成功。区分已验证 vs 未验证。不模糊确定结果</td>
+      </tr>
+
+      <tr><td colspan="4" style="background:rgba(188,140,255,0.06); color:var(--purple); font-weight:600; font-size:12px; padding:6px 10px;">需要 Anthropic 特有基础设施（第三方无法替代）</td></tr>
+      <tr>
+        <td><span class="t t-sonnet">锁定</span></td>
+        <td>Sonnet sideQuery（记忆选择）</td>
+        <td><span style="color:var(--red)">需替换</span></td>
+        <td>用 Sonnet 小模型选相关记忆。可用其他小模型替代，但选择质量取决于模型能力</td>
+      </tr>
+      <tr>
+        <td><span class="t t-sonnet">锁定</span></td>
+        <td>后台记忆提取 Agent</td>
+        <td><span style="color:var(--red)">需替换</span></td>
+        <td>fork Agent 自动从对话提取记忆。可用其他模型，但提取质量取决于推理能力</td>
+      </tr>
+      <tr>
+        <td><span class="t t-sonnet">锁定</span></td>
+        <td>12 个 Beta Features</td>
+        <td><span style="color:var(--red)">不可</span></td>
+        <td>interleaved-thinking, context-1m, fast-mode, tool-search 等。纯 Anthropic 专有</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Model Quality Tiers -->
+<div class="section">
+  <div class="stitle"><span class="dot" style="background:var(--orange)"></span>不同模型能力下的预期体验</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:120px">模型能力</th>
+        <th style="width:120px">工具调用</th>
+        <th style="width:120px">记忆系统</th>
+        <th style="width:120px">代码质量</th>
+        <th>Compact 摘要</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>顶级</b><br><small>Claude Opus, GPT-5</small></td>
+        <td>精准选工具，合理并行</td>
+        <td>准确分类，有判断力</td>
+        <td>风格匹配，安全意识强</td>
+        <td>高保真 9 段摘要</td>
+      </tr>
+      <tr>
+        <td><b>强</b><br><small>Sonnet, GPT-4o</small></td>
+        <td>大部分正确，偶尔选错</td>
+        <td>能写但分类偶有偏差</td>
+        <td>基本匹配，安全意识中等</td>
+        <td>可用但细节可能丢失</td>
+      </tr>
+      <tr>
+        <td><b>中等</b><br><small>Gemini Flash, Mistral</small></td>
+        <td>简单任务可用，复杂链路出错</td>
+        <td>格式可能不符 frontmatter 规范</td>
+        <td>风格不一致，scope 控制差</td>
+        <td>摘要遗漏关键信息</td>
+      </tr>
+      <tr>
+        <td><b>弱</b><br><small>小型本地模型</small></td>
+        <td>经常调错工具或参数格式错误</td>
+        <td>基本不可用</td>
+        <td>引入 bug 和安全问题</td>
+        <td>不可用</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Bottom Line -->
+<div class="note" style="margin-top:16px; border-left-color: var(--red);">
+  <strong>结论：</strong><br>
+  API 格式差异可以用 Shim 解决（openclaude 已证明）。但模型的<b>推理质量</b>无法绕过：<br>
+  &bull; <b>工具选择</b>需要从 43 个中精准选择 + 判断并行/串行<br>
+  &bull; <b>50+ 条规则同时遵守</b>需要强 instruction following<br>
+  &bull; <b>记忆判断</b>需要知道什么值得记、什么不值得<br>
+  &bull; <b>Compact 摘要</b>需要保留精确代码片段和决策理由<br>
+  &bull; <b>Scope 自律</b>需要克制"改进"冲动 — 这可能是最难复制的<br>
+  小模型可以通过 Shim 调通 API，但实际使用体验会显著下降。系统设计假设的是顶级模型的推理能力。
+</div>
+
+<!-- ===== Related Docs ===== -->
+<div class="note" style="margin-top:12px;">
+  <strong>相关文档：</strong><br>
+  &bull; <code>doc/llm-usage-analysis.html</code> &mdash; LLM 使用分析 + Prompt 体系 + Memory 系统 + Compact 算法 + 模型切换风险<br>
+  &bull; <code>doc/session-lifecycle.html</code> &mdash; 会话生命周期全景图（6 个 Phase + 泳道图）<br>
+  &bull; <code>doc/context-growth.html</code> &mdash; Context% 增长解剖（可视化条形图 + 增长公式）
+</div>
+
+</body>
+</html>
