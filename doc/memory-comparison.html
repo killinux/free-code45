@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory 管理对比：Claude Code vs Memori</title>
+<style>
+  :root {
+    --bg:#0f1117; --card:#1a1d2e; --border:#2a2d3e;
+    --text:#e0e0e0; --text-dim:#8b8fa3;
+    --accent:#6c8aff; --accent2:#a78bfa; --accent3:#34d399;
+    --accent4:#fbbf24; --accent5:#f472b6; --danger:#ef4444;
+    --code-bg:#141620;
+    --cc:#6c8aff; --mem:#f472b6;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',-apple-system,'PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--text); line-height:1.7; }
+  .hero { background:linear-gradient(135deg,#1a1040 0%,#0f1117 50%,#0a1628 100%); padding:72px 40px; text-align:center; border-bottom:1px solid var(--border); position:relative; overflow:hidden; }
+  .hero::before { content:''; position:absolute; inset:-50%; width:200%; height:200%; background:radial-gradient(circle at 30% 40%,rgba(108,138,255,0.06) 0%,transparent 50%),radial-gradient(circle at 70% 60%,rgba(244,114,182,0.06) 0%,transparent 50%); }
+  .hero h1 { font-size:2.4em; font-weight:700; position:relative; margin-bottom:14px; background:linear-gradient(135deg,#6c8aff,#f472b6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  .hero p { color:var(--text-dim); font-size:1.1em; position:relative; max-width:680px; margin:0 auto; }
+  .container { max-width:1200px; margin:0 auto; padding:40px 24px; }
+  section { margin-bottom:56px; }
+  .section-header { display:flex; align-items:center; gap:14px; margin-bottom:24px; padding-bottom:12px; border-bottom:1px solid var(--border); }
+  .section-icon { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:1.3em; flex-shrink:0; }
+  .section-header h2 { font-size:1.5em; font-weight:600; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:24px; margin-bottom:16px; }
+  .card h3 { font-size:1.1em; font-weight:600; margin-bottom:12px; color:var(--accent2); }
+  .card h4 { font-size:0.95em; font-weight:600; margin:16px 0 8px; color:var(--accent3); }
+  .card p,.card li { color:var(--text-dim); font-size:0.93em; line-height:1.8; }
+  .card ul,.card ol { padding-left:20px; margin:8px 0; }
+  .card li { margin-bottom:4px; }
+  .grid-2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0; font-size:0.9em; }
+  th,td { text-align:left; padding:10px 14px; border-bottom:1px solid var(--border); }
+  th { color:var(--accent); font-weight:600; font-size:0.85em; }
+  td { color:var(--text-dim); }
+  tr:last-child td { border-bottom:none; }
+  code { background:var(--code-bg); padding:2px 7px; border-radius:4px; font-family:'JetBrains Mono',monospace; font-size:0.88em; color:var(--accent3); }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:20px; overflow-x:auto; margin:12px 0; font-family:'JetBrains Mono',monospace; font-size:0.85em; line-height:1.7; color:var(--text-dim); }
+  .tag { display:inline-block; padding:2px 10px; border-radius:20px; font-size:0.78em; font-weight:600; margin-right:6px; }
+  .tag-cc { background:rgba(108,138,255,0.15); color:var(--cc); }
+  .tag-mem { background:rgba(244,114,182,0.15); color:var(--mem); }
+  .tag-green { background:rgba(52,211,153,0.15); color:var(--accent3); }
+  .tag-yellow { background:rgba(251,191,36,0.15); color:var(--accent4); }
+  .highlight-box { border-left:3px solid var(--accent); background:rgba(108,138,255,0.05); padding:16px 20px; border-radius:0 8px 8px 0; margin:16px 0; }
+  .highlight-box.insight { border-left-color:var(--accent3); background:rgba(52,211,153,0.05); }
+  .highlight-box.warn { border-left-color:var(--accent4); background:rgba(251,191,36,0.05); }
+  .vs { display:flex; gap:16px; margin:16px 0; flex-wrap:wrap; }
+  .vs-side { flex:1; min-width:300px; background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:20px; }
+  .vs-side h4 { margin-bottom:10px; font-size:0.95em; }
+  .vs-cc h4 { color:var(--cc); }
+  .vs-mem h4 { color:var(--mem); }
+  footer { text-align:center; padding:40px; color:var(--text-dim); font-size:0.85em; border-top:1px solid var(--border); margin-top:40px; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Memory 管理对比分析</h1>
+  <p><span class="tag tag-cc">Claude Code</span> vs <span class="tag tag-mem">Memori</span> &mdash; 两种截然不同的 AI 记忆架构哲学</p>
+</div>
+
+<div class="container">
+
+<!-- ===== 总览 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(108,138,255,0.15);">&#9881;</div>
+    <h2>总览对比</h2>
+  </div>
+  <div class="card">
+    <table>
+      <tr><th>维度</th><th><span class="tag tag-cc">Claude Code</span></th><th><span class="tag tag-mem">Memori</span></th></tr>
+      <tr><td><strong>定位</strong></td><td>单开发者 CLI 工具的内置记忆</td><td>通用 AI 记忆层（SaaS / 自托管）</td></tr>
+      <tr><td><strong>存储后端</strong></td><td>文件系统（Markdown 文件）</td><td>SQL 数据库（Postgres/MySQL/MongoDB 等）+ 向量索引</td></tr>
+      <tr><td><strong>记忆结构</strong></td><td>4 类型 + 12 分区会话笔记</td><td>5 类别 + 语义三元组知识图谱</td></tr>
+      <tr><td><strong>检索方式</strong></td><td>LLM（Sonnet）判断相关性</td><td>BM25 + FAISS 余弦相似度混合搜索</td></tr>
+      <tr><td><strong>上下文预算</strong></td><td>动态（压缩 + LLM 选择）</td><td>固定上限（~1,294 token/查询，5%）</td></tr>
+      <tr><td><strong>记忆创建</strong></td><td>分叉子代理后台提取</td><td>API 拦截 + 异步增强管线</td></tr>
+      <tr><td><strong>生命周期</strong></td><td>渐进式压缩 + Auto Dream 合并</td><td>重要性评分 &rarr; 三级保留（短/长/永久）</td></tr>
+      <tr><td><strong>多用户</strong></td><td>团队记忆（安全验证）</td><td>一等公民（Entity/Process/Session 层级）</td></tr>
+      <tr><td><strong>知识图谱</strong></td><td>无</td><td>有（语义三元组）</td></tr>
+      <tr><td><strong>Token 效率</strong></td><td>未公开基准</td><td>比全上下文便宜 20x，比 Zep 减少 67%</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ===== 1. 存储架构 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(167,139,250,0.15);">&#9670;</div>
+    <h2>1. 存储架构：文件 vs 数据库</h2>
+  </div>
+  <div class="vs">
+    <div class="vs-side vs-cc">
+      <h4>Claude Code &mdash; 文件系统</h4>
+      <pre>~/.claude/projects/&lt;path&gt;/memory/
+  MEMORY.md          # 索引文件（200行/25KB上限）
+  user_role.md       # 记忆文件（frontmatter + 内容）
+  feedback_test.md
+  team/
+    MEMORY.md        # 团队记忆索引
+    project_auth.md</pre>
+      <ul>
+        <li>人类可读，可直接编辑</li>
+        <li>可 Git 版本控制</li>
+        <li>零依赖，无需数据库</li>
+        <li>检索依赖 LLM，不可结构化查询</li>
+      </ul>
+    </div>
+    <div class="vs-side vs-mem">
+      <h4>Memori &mdash; SQL + 向量</h4>
+      <pre>SemanticTriple {
+  subject_name, subject_type,
+  predicate,
+  object_name, object_type
+}
+Entity {
+  facts: string[],
+  fact_embeddings: vector[],
+  semantic_triples: Triple[]
+}
+Memory { conversation, entity, process }</pre>
+      <ul>
+        <li>结构化查询（SQL）</li>
+        <li>向量相似度搜索（FAISS）</li>
+        <li>语义三元组构建知识图谱</li>
+        <li>需要数据库基础设施</li>
+      </ul>
+    </div>
+  </div>
+  <div class="highlight-box insight">
+    <strong>启发：</strong>Claude Code 的文件方案对开发者友好（可读可编辑可版本控制），但缺乏结构化查询能力。可以考虑在文件系统之上增加一层<strong>轻量级索引</strong>（如 SQLite 或 JSON 索引），在不引入重基础设施的情况下实现更精确的检索。
+  </div>
+</section>
+
+<!-- ===== 2. 记忆类型 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(52,211,153,0.15);">&#9998;</div>
+    <h2>2. 记忆分类体系</h2>
+  </div>
+  <div class="vs">
+    <div class="vs-side vs-cc">
+      <h4>Claude Code &mdash; 4 类型</h4>
+      <table>
+        <tr><td><strong>user</strong></td><td>用户画像（角色、偏好、知识背景）</td></tr>
+        <tr><td><strong>feedback</strong></td><td>行为反馈（纠正 + 确认）</td></tr>
+        <tr><td><strong>project</strong></td><td>项目上下文（截止日期、决策、事故）</td></tr>
+        <tr><td><strong>reference</strong></td><td>外部引用（Linear/Grafana/Slack 指针）</td></tr>
+      </table>
+      <p>每种类型有明确的"何时保存"和"如何使用"指导。</p>
+    </div>
+    <div class="vs-side vs-mem">
+      <h4>Memori &mdash; 5 类别</h4>
+      <table>
+        <tr><td><strong>fact</strong></td><td>事实性知识</td></tr>
+        <tr><td><strong>preference</strong></td><td>用户偏好</td></tr>
+        <tr><td><strong>skill</strong></td><td>技能/操作知识</td></tr>
+        <tr><td><strong>context</strong></td><td>上下文信息</td></tr>
+        <tr><td><strong>rule</strong></td><td>规则/约束</td></tr>
+      </table>
+      <p>每种类别有不同的检索和保留行为。</p>
+    </div>
+  </div>
+  <div class="highlight-box insight">
+    <strong>启发：</strong>Memori 的 <code>skill</code>（技能）类别是 Claude Code 缺失的。Claude Code 的 feedback 类型部分覆盖了"如何做"的知识，但没有专门的<strong>操作性记忆</strong>（如"这个项目的部署流程是 X &rarr; Y &rarr; Z"）。另外 Memori 的 <code>rule</code> 类别也值得借鉴 &mdash; 明确的约束规则比混在 feedback 中更容易被系统强制执行。
+  </div>
+</section>
+
+<!-- ===== 3. 检索机制 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(244,114,182,0.15);">&#9733;</div>
+    <h2>3. 检索机制：LLM 判断 vs 混合搜索</h2>
+  </div>
+  <div class="card">
+    <h3>Claude Code：LLM-as-Judge</h3>
+    <ol>
+      <li>扫描记忆目录，读取所有文件的 frontmatter（最多 200 个）</li>
+      <li>格式化为文本清单：<code>[type] filename (时间): description</code></li>
+      <li><strong>调用 Sonnet 3.5</strong>，传入用户查询 + 清单 + 最近使用的工具</li>
+      <li>模型返回最多 5 个最相关的文件名</li>
+    </ol>
+    <p><span class="tag tag-green">优势</span> 语义理解深，能处理模糊关联（"我上次说的那个 Bug" &rarr; 找到对应记忆）</p>
+    <p><span class="tag tag-yellow">劣势</span> 每次检索消耗一次 API 调用；延迟高；200 文件上限是硬天花板</p>
+  </div>
+  <div class="card">
+    <h3>Memori：BM25 + FAISS 混合搜索</h3>
+    <pre>rank_score = (w_cos * dense_similarity) + (w_lex * lexical_score)
+
+短查询（&le;2 词）: w_lex = 0.30  // 更依赖精确词匹配
+长查询（>2 词）:   w_lex = 0.15  // 更依赖语义相似度
+
+候选池：有查询文本时扩大 10x（最少 50），让词汇信号影响排序</pre>
+    <p><span class="tag tag-green">优势</span> 毫秒级检索；可扩展到百万级记忆；无 API 调用成本；可离线运行</p>
+    <p><span class="tag tag-yellow">劣势</span> 需要维护向量索引；对隐式关联的理解不如 LLM</p>
+  </div>
+  <div class="highlight-box insight">
+    <strong>启发：</strong>这是最值得 Claude Code 借鉴的点。当前的 LLM 检索方式在记忆文件增多时不可扩展（200 文件硬上限）。可以考虑<strong>两级检索</strong>：
+    <ol style="margin-top:8px;">
+      <li><strong>第一级</strong>：轻量级向量/BM25 预筛选，从数百个记忆中快速缩小到 ~20 个候选</li>
+      <li><strong>第二级</strong>：用 LLM 从候选中精选最终 5 个</li>
+    </ol>
+    <p>这样既保留了 LLM 的深度理解，又突破了文件数上限，还减少了 LLM 需要处理的清单长度。</p>
+  </div>
+</section>
+
+<!-- ===== 4. 记忆创建 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(251,191,36,0.15);">&#9881;</div>
+    <h2>4. 记忆创建：子代理 vs API 拦截</h2>
+  </div>
+  <div class="vs">
+    <div class="vs-side vs-cc">
+      <h4>Claude Code &mdash; 分叉子代理</h4>
+      <ul>
+        <li><code>runForkedAgent()</code> 创建隔离子代理</li>
+        <li>共享父级 Prompt 缓存，降低成本</li>
+        <li>子代理用工具读取对话 &rarr; 写入记忆文件</li>
+        <li>与主代理互斥：主代理写了就跳过后台</li>
+        <li>最多 5 轮，60 秒超时</li>
+      </ul>
+    </div>
+    <div class="vs-side vs-mem">
+      <h4>Memori &mdash; API 拦截 + 异步增强</h4>
+      <ul>
+        <li>透明包裹任何 LLM 的 API 调用</li>
+        <li>每轮对话自动触发 Memory Agent 提取</li>
+        <li>异步增强管线：50 个并发 worker</li>
+        <li>8 种增强类型：属性/事件/事实/人物/偏好/关系/规则/技能</li>
+        <li>批量写入（100 条/批，0.1 秒超时）</li>
+        <li><strong>零延迟</strong>：提取完全在后台，不阻塞对话</li>
+      </ul>
+    </div>
+  </div>
+  <div class="highlight-box insight">
+    <strong>启发：</strong>Memori 的"零延迟异步增强管线"是一个优秀设计。Claude Code 的分叉子代理虽然也是后台执行，但仍然消耗一次 API 调用。Memori 的 50-worker 批量写入模式在高频场景下效率更高。可以考虑将 Claude Code 的记忆提取从"调用 LLM 子代理"改为<strong>基于规则的快速提取 + 异步 LLM 精炼</strong>的两阶段模式。
+  </div>
+</section>
+
+<!-- ===== 5. 生命周期管理 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(108,138,255,0.15);">&#9729;</div>
+    <h2>5. 生命周期管理</h2>
+  </div>
+  <div class="vs">
+    <div class="vs-side vs-cc">
+      <h4>Claude Code &mdash; 渐进式压缩 + 合并</h4>
+      <ul>
+        <li><strong>微压缩</strong>：清理工具结果（实时）</li>
+        <li><strong>自动压缩</strong>：对话摘要化（会话内）</li>
+        <li><strong>会话记忆</strong>：12 分区结构化笔记（会话级）</li>
+        <li><strong>持久记忆</strong>：跨会话提取（永久）</li>
+        <li><strong>Auto Dream</strong>：24h+5 会话后合并去重（跨会话）</li>
+        <li>记忆新鲜度标记：>1 天附带警告</li>
+      </ul>
+    </div>
+    <div class="vs-side vs-mem">
+      <h4>Memori &mdash; 重要性驱动的三级保留</h4>
+      <ul>
+        <li><strong>短期记忆</strong>：近期活动，~7 天过期</li>
+        <li><strong>长期记忆</strong>：重要信息、技能、偏好</li>
+        <li><strong>永久记忆</strong>：核心规则、关键偏好、基本事实</li>
+        <li>创建时通过重要性评分决定保留层级</li>
+        <li>无显式的合并/压缩机制</li>
+        <li>ID 缓存防止重复写入</li>
+      </ul>
+    </div>
+  </div>
+  <div class="highlight-box insight">
+    <strong>启发：</strong>两种方案各有优势。Claude Code 的<strong>渐进式压缩</strong>更适合长对话场景（对话可能持续数小时），而 Memori 的<strong>重要性评分</strong>更适合高频短对话场景。一个值得探索的方向是结合两者：在创建时评分决定保留层级（如 Memori），同时在会话中做渐进式压缩（如 Claude Code）。另外，Memori 的 7 天短期过期机制是 Claude Code 缺少的 &mdash; 当前 Claude Code 的记忆没有自动过期，可能导致陈旧记忆堆积。
+  </div>
+</section>
+
+<!-- ===== 6. 上下文窗口策略 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(52,211,153,0.15);">&#9889;</div>
+    <h2>6. 上下文窗口策略</h2>
+  </div>
+  <div class="card">
+    <h3>Memori 的双注入模式</h3>
+    <div class="grid-2">
+      <div>
+        <h4>Conscious Ingest（意识注入）</h4>
+        <p>启动时一次性注入"本质身份上下文"，标记为 <code>conscious-info</code>，估算 100-300 token。类似于人类的"核心身份记忆"。</p>
+      </div>
+      <div>
+        <h4>Auto Ingest（自动注入）</h4>
+        <p>每次查询动态检索，上限 5 条记忆，估算 200-500 token。类似于人类的"按需回忆"。</p>
+      </div>
+    </div>
+    <p style="margin-top:12px;">两种模式合计平均 <strong>~1,294 token/查询</strong>，仅占全上下文的 <strong>4.97%</strong>。</p>
+  </div>
+  <div class="card">
+    <h3>Claude Code 的动态管理</h3>
+    <p>没有固定的"意识"/"自动"二分法，而是通过多层压缩动态管理：</p>
+    <ul>
+      <li>记忆注入：每文件 4KB，每轮 5 个 (~20KB)，会话累计 60KB</li>
+      <li>CLAUDE.md + 记忆文件作为用户上下文前置</li>
+      <li>当上下文紧张时，通过压缩释放空间</li>
+    </ul>
+  </div>
+  <div class="highlight-box insight">
+    <strong>启发：</strong>Memori 的"Conscious Ingest"概念非常有价值。将记忆分为<strong>"核心身份"（始终注入）</strong>和<strong>"动态回忆"（按需注入）</strong>是一个优雅的设计。Claude Code 可以考虑将某些 user 类型记忆标记为"核心"，保证它们始终在上下文中，而不是依赖每次的相关性选择。
+  </div>
+</section>
+
+<!-- ===== 7. 知识图谱 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(167,139,250,0.15);">&#9733;</div>
+    <h2>7. 知识图谱：Claude Code 缺失的维度</h2>
+  </div>
+  <div class="card">
+    <h3>Memori 的语义三元组</h3>
+    <pre>SemanticTriple {
+  subject_name: "用户",     subject_type: "Person",
+  predicate: "偏好使用",
+  object_name: "TypeScript",  object_type: "Language"
+}
+
+// 可以推理：
+// "用户" --偏好使用--> "TypeScript"
+// "TypeScript" --被偏好使用于--> "项目A"
+// 推导："用户" 在 "项目A" 中可能偏好 "TypeScript"</pre>
+    <p>通过三元组构建实体间的关系网络，支持：</p>
+    <ul>
+      <li><strong>关系推理</strong>：沿图谱路径发现隐式关联</li>
+      <li><strong>实体消歧</strong>：相同名称在不同上下文中的区分</li>
+      <li><strong>知识传播</strong>：一个实体的更新可以影响相关实体</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Claude Code 的扁平结构</h3>
+    <p>Claude Code 的记忆是<strong>独立的文件</strong>，文件之间没有显式的关联关系。相关性完全依赖 LLM 在运行时判断。</p>
+    <p>这意味着：</p>
+    <ul>
+      <li>无法通过结构化查询找到"与 X 相关的所有记忆"</li>
+      <li>记忆之间的关联是隐式的（靠描述文本中的关键词）</li>
+      <li>当记忆增多时，LLM 很难从 200 条描述中发现深层关联</li>
+    </ul>
+  </div>
+  <div class="highlight-box insight">
+    <strong>启发：</strong>虽然完整的知识图谱对 Claude Code 的文件架构来说过重，但可以借鉴<strong>轻量级关联</strong>的思路。例如在 frontmatter 中增加 <code>related</code> 字段：
+    <pre style="margin-top:8px;">---
+name: auth-migration
+type: project
+related: [feedback_testing.md, reference_linear.md]
+---</pre>
+    <p>这样在检索时可以做"关联展开" &mdash; 选中一个记忆后，自动将其关联记忆也纳入候选。</p>
+  </div>
+</section>
+
+<!-- ===== 8. 安全与多租户 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(239,68,68,0.15);">&#9888;</div>
+    <h2>8. 安全与多租户</h2>
+  </div>
+  <div class="vs">
+    <div class="vs-side vs-cc">
+      <h4>Claude Code &mdash; 文件系统级隔离</h4>
+      <ul>
+        <li>团队记忆通过目录前缀隔离</li>
+        <li>路径遍历防护（5 种攻击模式）</li>
+        <li>符号链接解析验证</li>
+        <li>前缀攻击防护（要求分隔符）</li>
+        <li>记忆文件权限：0o600（仅所有者读写）</li>
+        <li>敏感数据警告（禁止 API Key 等）</li>
+      </ul>
+    </div>
+    <div class="vs-side vs-mem">
+      <h4>Memori &mdash; 数据库级隔离</h4>
+      <ul>
+        <li>Entity/Process/Session 三级层次结构</li>
+        <li>每条记忆必须标记 entity_id + process_id</li>
+        <li>数据库级别的访问控制</li>
+        <li>支持多租户 SaaS 部署</li>
+        <li>API Key 认证</li>
+      </ul>
+    </div>
+  </div>
+  <div class="highlight-box">
+    <strong>各有所长：</strong>Claude Code 的文件系统安全防护非常细致（5 种路径遍历攻击、符号链接解析），适合本地开发场景。Memori 的数据库级隔离更适合多用户 SaaS 场景。对于 Claude Code 的团队功能演进，可以参考 Memori 的 Entity/Process 层级，在文件系统之上建立更细粒度的归属模型。
+  </div>
+</section>
+
+<!-- ===== 9. 关键启发总结 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(52,211,153,0.15);">&#9733;</div>
+    <h2>9. 关键启发总结</h2>
+  </div>
+
+  <div class="card" style="border-color:var(--accent3);">
+    <h3 style="color:var(--accent3);">最值得借鉴的 5 个设计</h3>
+    <table>
+      <tr><th>#</th><th>Memori 的设计</th><th>对 Claude Code 的启发</th><th>落地难度</th></tr>
+      <tr>
+        <td>1</td>
+        <td><strong>混合检索（BM25 + 向量）</strong></td>
+        <td>增加轻量级预筛选层，突破 200 文件上限，减少 LLM 调用</td>
+        <td><span class="tag tag-yellow">中</span> 需引入嵌入模型或 SQLite FTS</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><strong>Conscious Ingest（核心身份注入）</strong></td>
+        <td>标记核心 user 记忆为"始终注入"，不依赖每次的相关性选择</td>
+        <td><span class="tag tag-green">低</span> 在 frontmatter 加 <code>priority: core</code> 即可</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><strong>三级保留（短/长/永久）</strong></td>
+        <td>为记忆增加 TTL 机制，project 类型 30 天过期，user/reference 永久</td>
+        <td><span class="tag tag-green">低</span> 基于 mtime + type 规则即可实现</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><strong>语义三元组 / 关联关系</strong></td>
+        <td>在 frontmatter 增加 <code>related</code> 字段，检索时做关联展开</td>
+        <td><span class="tag tag-green">低</span> 不需要图数据库，文件引用即可</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td><strong>零延迟异步增强管线</strong></td>
+        <td>将记忆提取拆为"快速规则提取" + "异步 LLM 精炼"两阶段</td>
+        <td><span class="tag tag-yellow">中</span> 需要重构提取流程</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Claude Code 的独有优势（不应丢失）</h3>
+    <ul>
+      <li><strong>文件可读可编辑</strong> &mdash; 用户可以直接编辑记忆文件，Memori 的数据库做不到</li>
+      <li><strong>Git 版本控制</strong> &mdash; 记忆变更可追溯，可回滚</li>
+      <li><strong>渐进式压缩</strong> &mdash; 对长对话场景的优化非常成熟（5 层压缩机制）</li>
+      <li><strong>Auto Dream</strong> &mdash; 受生物学启发的记忆合并，这是 Memori 没有的</li>
+      <li><strong>零基础设施</strong> &mdash; 不需要数据库、向量服务或任何外部依赖</li>
+      <li><strong>与 CLAUDE.md 深度集成</strong> &mdash; 指令记忆和知识记忆统一在一个体系中</li>
+    </ul>
+  </div>
+
+  <div class="highlight-box insight">
+    <strong>总体判断：</strong>Claude Code 和 Memori 代表了 AI 记忆管理的两种哲学 &mdash; <strong>"文件优先、LLM 驱动"</strong> vs <strong>"数据库优先、算法驱动"</strong>。最理想的方案是<strong>两者结合</strong>：保持 Claude Code 的文件可读性和零依赖特性，同时引入 Memori 的混合检索、核心记忆分层和自动过期机制。其中"两级检索"和"核心身份注入"是投入产出比最高的两个改进方向。
+  </div>
+</section>
+
+</div>
+
+<footer>
+  Memory 管理对比分析：Claude Code vs Memori &mdash; 2026-04-08
+</footer>
+
+</body>
+</html>

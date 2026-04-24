@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code 内存管理原理深度拆解</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1d2e; --border: #2a2d3e;
+    --text: #e0e0e0; --text-dim: #8b8fa3;
+    --accent: #6c8aff; --accent2: #a78bfa; --accent3: #34d399;
+    --accent4: #fbbf24; --accent5: #f472b6; --danger: #ef4444;
+    --code-bg: #141620;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',-apple-system,'PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--text); line-height:1.7; }
+  .hero { background:linear-gradient(135deg,#1a1040 0%,#0f1117 50%,#0a1628 100%); padding:72px 40px; text-align:center; border-bottom:1px solid var(--border); position:relative; overflow:hidden; }
+  .hero::before { content:''; position:absolute; inset:-50%; width:200%; height:200%; background:radial-gradient(circle at 40% 40%,rgba(167,139,250,0.07) 0%,transparent 50%),radial-gradient(circle at 70% 60%,rgba(244,114,182,0.06) 0%,transparent 50%); animation:drift 20s ease-in-out infinite; }
+  @keyframes drift { 0%,100%{transform:translate(0)} 50%{transform:translate(-2%,1%)} }
+  .hero h1 { font-size:2.5em; font-weight:700; position:relative; margin-bottom:14px; background:linear-gradient(135deg,#a78bfa,#f472b6,#fbbf24); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  .hero p { color:var(--text-dim); font-size:1.1em; position:relative; max-width:640px; margin:0 auto; }
+  .container { max-width:1200px; margin:0 auto; padding:40px 24px; }
+  section { margin-bottom:56px; }
+  .section-header { display:flex; align-items:center; gap:14px; margin-bottom:24px; padding-bottom:12px; border-bottom:1px solid var(--border); }
+  .section-icon { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:1.3em; flex-shrink:0; }
+  .section-header h2 { font-size:1.5em; font-weight:600; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:24px; margin-bottom:16px; }
+  .card h3 { font-size:1.1em; font-weight:600; margin-bottom:12px; color:var(--accent2); }
+  .card h4 { font-size:0.95em; font-weight:600; margin:16px 0 8px; color:var(--accent3); }
+  .card p,.card li { color:var(--text-dim); font-size:0.93em; line-height:1.8; }
+  .card ul,.card ol { padding-left:20px; margin:8px 0; }
+  .card li { margin-bottom:4px; }
+  .grid-2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; }
+  .grid-3 { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0; font-size:0.9em; }
+  th,td { text-align:left; padding:10px 14px; border-bottom:1px solid var(--border); }
+  th { color:var(--accent); font-weight:600; font-size:0.85em; text-transform:uppercase; letter-spacing:0.5px; }
+  td { color:var(--text-dim); }
+  tr:last-child td { border-bottom:none; }
+  code { background:var(--code-bg); padding:2px 7px; border-radius:4px; font-family:'JetBrains Mono','Fira Code',monospace; font-size:0.88em; color:var(--accent3); }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:20px; overflow-x:auto; margin:12px 0; font-family:'JetBrains Mono','Fira Code',monospace; font-size:0.85em; line-height:1.7; color:var(--text-dim); }
+  .tag { display:inline-block; padding:2px 10px; border-radius:20px; font-size:0.78em; font-weight:600; margin-right:6px; }
+  .tag-blue { background:rgba(108,138,255,0.15); color:var(--accent); }
+  .tag-purple { background:rgba(167,139,250,0.15); color:var(--accent2); }
+  .tag-green { background:rgba(52,211,153,0.15); color:var(--accent3); }
+  .tag-yellow { background:rgba(251,191,36,0.15); color:var(--accent4); }
+  .tag-pink { background:rgba(244,114,182,0.15); color:var(--accent5); }
+  .tag-red { background:rgba(239,68,68,0.15); color:var(--danger); }
+  .highlight-box { border-left:3px solid var(--accent); background:rgba(108,138,255,0.05); padding:16px 20px; border-radius:0 8px 8px 0; margin:16px 0; }
+  .highlight-box.warn { border-left-color:var(--accent4); background:rgba(251,191,36,0.05); }
+  .highlight-box.danger { border-left-color:var(--danger); background:rgba(239,68,68,0.05); }
+  .highlight-box.success { border-left-color:var(--accent3); background:rgba(52,211,153,0.05); }
+  .file-ref { color:var(--accent3); font-family:'JetBrains Mono',monospace; font-size:0.85em; }
+  footer { text-align:center; padding:40px; color:var(--text-dim); font-size:0.85em; border-top:1px solid var(--border); margin-top:40px; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>内存管理原理深度拆解</h1>
+  <p>从文件扫描、相关性选择、记忆注入到团队共享 &mdash; 每个环节的实现细节</p>
+</div>
+
+<div class="container">
+
+<!-- ===== 第1节：记忆文件系统 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(108,138,255,0.15);">&#9776;</div>
+    <h2>1. 记忆文件系统</h2>
+  </div>
+
+  <div class="card">
+    <h3>目录结构</h3>
+    <p><span class="file-ref">src/memdir/paths.ts</span></p>
+    <pre>~/.claude/
+  CLAUDE.md                        # 用户级全局指令
+  session-memory/
+    MEMORY.md                      # 当前会话的结构化笔记
+    config/
+      template.md                  # 可自定义的会话笔记模板
+      prompt.md                    # 可自定义的提取提示词
+  projects/
+    &lt;sanitized-git-root&gt;/
+      memory/                      # 持久记忆（Auto Memory）
+        MEMORY.md                  # 记忆索引文件（入口点）
+        user_role.md               # 用户类记忆示例
+        feedback_testing.md        # 反馈类记忆示例
+        team/                      # 团队共享记忆
+          MEMORY.md                # 团队记忆索引
+          project_auth.md          # 团队项目记忆示例
+      logs/                        # KAIROS 模式日志
+        YYYY/MM/YYYY-MM-DD.md     # 按日期的追加日志</pre>
+  </div>
+
+  <div class="card">
+    <h3>路径解析优先级</h3>
+    <p><code>getAutoMemPath()</code> 按以下优先级确定记忆目录：</p>
+    <ol>
+      <li><code>CLAUDE_COWORK_MEMORY_PATH_OVERRIDE</code> 环境变量（Cowork 场景完整路径覆盖）</li>
+      <li><code>settings.json</code> 中的 <code>autoMemoryDirectory</code>（仅信任 policy/flag/local/user 来源，不信任 projectSettings）</li>
+      <li>默认路径：<code>~/.claude/projects/&lt;sanitized-git-root&gt;/memory/</code></li>
+    </ol>
+    <div class="highlight-box">
+      <strong>Git Worktree 共享：</strong>使用 <code>findCanonicalGitRoot()</code> 确保所有 worktree 共享同一个记忆目录。无 Git 仓库时降级为 <code>getProjectRoot()</code>。
+    </div>
+    <p><code>getAutoMemPath()</code> 在 <code>getProjectRoot()</code> 上做了记忆化（memoize），避免频繁的 stat 调用。</p>
+  </div>
+
+  <div class="card">
+    <h3>MEMORY.md 入口点管理</h3>
+    <p><span class="file-ref">src/memdir/memdir.ts</span></p>
+    <table>
+      <tr><th>限制</th><th>值</th><th>说明</th></tr>
+      <tr><td>最大行数</td><td>200</td><td>超过后截断并追加警告</td></tr>
+      <tr><td>最大字节</td><td>25,000</td><td>防止单行超长的索引</td></tr>
+    </table>
+    <h4>截断策略 <code>truncateEntrypointContent()</code></h4>
+    <ul>
+      <li><strong>先按行截断</strong>（自然换行边界，200 行）</li>
+      <li><strong>再按字节截断</strong>（在 25KB 前的最后一个换行符处切割）</li>
+      <li>追加警告消息，明确告知触发了哪个限制</li>
+      <li>返回 <code>EntrypointTruncation</code> 对象：内容、行数、字节数、是否行截断、是否字节截断</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 第2节：记忆类型体系 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(167,139,250,0.15);">&#9998;</div>
+    <h2>2. 四种记忆类型</h2>
+  </div>
+
+  <div class="card">
+    <p><span class="file-ref">src/memdir/memoryTypes.ts</span></p>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>user &mdash; 用户画像</h3>
+      <span class="tag tag-blue">始终私有</span>
+      <p>记录用户的角色、目标、职责和知识背景。帮助未来对话中针对性地调整回答风格。</p>
+      <h4>何时保存</h4>
+      <p>了解到用户角色、偏好、职责或知识领域的任何细节时。</p>
+      <h4>如何使用</h4>
+      <p>根据用户画像调整回答深度和方式。例如：资深工程师 vs 初学者需要不同的解释方式。</p>
+    </div>
+    <div class="card">
+      <h3>feedback &mdash; 行为反馈</h3>
+      <span class="tag tag-green">默认私有，项目级约定可共享</span>
+      <p>用户对工作方式的纠正和确认。<strong>同时记录失败和成功</strong> &mdash; 仅记录纠正会导致过度谨慎。</p>
+      <h4>何时保存</h4>
+      <p>用户纠正做法（"不要这样"、"停止 X"）<strong>或</strong>确认非显而易见的做法（"正是这样"、"完美"）时。</p>
+      <h4>结构要求</h4>
+      <pre>规则本身
+**Why:** 用户给出的原因
+**How to apply:** 何时/何处应用此规则</pre>
+    </div>
+    <div class="card">
+      <h3>project &mdash; 项目上下文</h3>
+      <span class="tag tag-purple">私有或团队，偏向团队</span>
+      <p>正在进行的工作、目标、截止日期、事故等项目级信息，不可从代码或 Git 历史中直接推导。</p>
+      <h4>何时保存</h4>
+      <p>了解到谁在做什么、为什么、何时完成。<strong>必须将相对日期转为绝对日期</strong>（"周四" &rarr; "2026-03-05"）。</p>
+      <h4>结构要求</h4>
+      <pre>事实或决定
+**Why:** 动机（约束、截止日期、利益相关者需求）
+**How to apply:** 如何影响建议</pre>
+    </div>
+    <div class="card">
+      <h3>reference &mdash; 外部引用</h3>
+      <span class="tag tag-yellow">通常共享</span>
+      <p>指向外部系统中信息所在位置的指针。帮助在未来需要时知道去哪里查找。</p>
+      <h4>何时保存</h4>
+      <p>了解到外部系统中的资源及其用途时。例如：Bug 跟踪在 Linear 的 "INGEST" 项目中。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>记忆文件格式（Frontmatter）</h3>
+    <pre>---
+name: {{记忆名称}}
+description: {{一行描述 — 用于未来会话中判断相关性，所以要具体}}
+type: {{user | feedback | project | reference}}
+---
+
+{{记忆内容 — feedback/project 类型建议使用: 规则/事实 + Why: + How to apply: 结构}}</pre>
+  </div>
+
+  <div class="card">
+    <h3>不应保存的内容</h3>
+    <ul>
+      <li>代码模式、架构、文件路径、项目结构 &mdash; 可从代码直接推导</li>
+      <li>Git 历史、最近变更 &mdash; <code>git log</code> / <code>git blame</code> 是权威来源</li>
+      <li>调试方案、修复食谱 &mdash; 修复在代码中，上下文在 commit message 中</li>
+      <li>已在 CLAUDE.md 中记录的内容</li>
+      <li>临时任务详情、进行中的工作、当前会话上下文</li>
+    </ul>
+    <div class="highlight-box warn">
+      <strong>关键判断：</strong>即使用户要求保存 PR 列表或活动摘要，也应该询问"什么是令人惊讶的或非显而易见的？" &mdash; 那部分才值得保留。
+    </div>
+  </div>
+</section>
+
+<!-- ===== 第3节：记忆扫描与相关性选择 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(52,211,153,0.15);">&#9670;</div>
+    <h2>3. 记忆扫描与相关性选择</h2>
+  </div>
+
+  <div class="card">
+    <h3>文件扫描 <code>scanMemoryFiles()</code></h3>
+    <p><span class="file-ref">src/memdir/memoryScan.ts</span></p>
+    <table>
+      <tr><th>参数</th><th>值</th><th>说明</th></tr>
+      <tr><td>MAX_MEMORY_FILES</td><td>200</td><td>最多返回的文件数</td></tr>
+      <tr><td>FRONTMATTER_MAX_LINES</td><td>30</td><td>每个文件读取的最大行数（仅解析 frontmatter）</td></tr>
+    </table>
+    <h4>算法</h4>
+    <ol>
+      <li>递归扫描记忆目录，筛选 <code>.md</code> 文件（排除 MEMORY.md 本身）</li>
+      <li>使用 <code>Promise.allSettled()</code> 并行读取所有文件的 frontmatter</li>
+      <li>单次 I/O：<code>readFileInRange()</code> 内部同时完成 stat（获取 <code>mtimeMs</code>）和读取，避免双重 stat</li>
+      <li>提取 <code>description</code> 和 <code>type</code> 字段</li>
+      <li>按修改时间降序排列（最新优先）</li>
+      <li>返回前 200 个 <code>MemoryHeader</code>：<code>{filename, filePath, mtimeMs, description, type}</code></li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3>相关性选择 <code>findRelevantMemories()</code></h3>
+    <p><span class="file-ref">src/memdir/findRelevantMemories.ts</span></p>
+    <h4>算法</h4>
+    <ol>
+      <li>调用 <code>scanMemoryFiles()</code> 获取所有记忆头信息</li>
+      <li>过滤掉已展示过的路径（<code>alreadySurfaced</code>）</li>
+      <li>将清单（manifest）格式化为文本列表：<code>[type] filename (ISO时间): description</code></li>
+      <li><strong>调用 Sonnet 3.5 模型</strong>，传入用户查询 + 清单 + 最近使用的工具列表</li>
+      <li>模型返回最多 <strong>5 个</strong>最相关的文件名（JSON Schema 约束输出）</li>
+      <li>验证返回的文件名是否在实际清单中存在</li>
+    </ol>
+    <div class="highlight-box">
+      <strong>工具过滤逻辑：</strong>如果用户正在使用某个工具，不展示该工具的使用文档（已在上下文中）。但<strong>仍然展示</strong>关于该工具的警告/注意事项（正在使用时更需要知道）。
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>记忆注入到对话中</h3>
+    <p><span class="file-ref">src/utils/attachments.ts</span></p>
+    <table>
+      <tr><th>限制</th><th>值</th><th>说明</th></tr>
+      <tr><td>每文件最大行数</td><td>200</td><td>注入时截断</td></tr>
+      <tr><td>每文件最大字节</td><td>4,096</td><td>约 4KB</td></tr>
+      <tr><td>每轮最多文件数</td><td>5</td><td>每轮最多 ~20KB</td></tr>
+      <tr><td>会话累计上限</td><td>61,440 字节</td><td>60KB，压缩后重置</td></tr>
+    </table>
+    <h4>预取机制 <code>startRelevantMemoryPrefetch()</code></h4>
+    <ol>
+      <li>提取最后一条真实用户消息（跳过系统注入的 meta 消息）</li>
+      <li>要求多词提示（正则检查包含空格）</li>
+      <li>创建子 AbortController（与主轮次 abort 绑定）</li>
+      <li><strong>非阻塞</strong>启动异步获取（后台运行）</li>
+      <li>返回 <code>Disposable</code> 句柄（<code>using</code> 语法，所有退出路径自动释放）</li>
+      <li>消费点在 query.ts 中：如果已完成则读取，否则跳过 &mdash; <strong>永远不阻塞主轮次</strong></li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3>记忆新鲜度标记</h3>
+    <p><span class="file-ref">src/memdir/memoryAge.ts</span></p>
+    <ul>
+      <li><code>memoryAge(mtimeMs)</code> &rarr; <code>'today'</code> / <code>'yesterday'</code> / <code>'N days ago'</code>（人类可读，模型表现更好）</li>
+      <li><code>memoryAgeDays(mtimeMs)</code> &rarr; 向下取整天数，时钟偏差时钳位到 0</li>
+      <li><strong>新鲜记忆</strong>（&le;1 天）：无警告</li>
+      <li><strong>陈旧记忆</strong>（>1 天）：追加 <code>&lt;system-reminder&gt;</code> 标签包裹的警告：
+        <em>"此记忆已有 N 天。记忆是时间点观察，在引用前请验证当前状态。"</em></li>
+    </ul>
+    <div class="highlight-box warn">
+      <strong>验证义务：</strong>在向用户推荐基于记忆的信息前：文件路径 &rarr; 检查是否存在；函数名 &rarr; grep 查找；准备执行（而非仅讨论历史）&rarr; 必须先验证。"记忆说 X 存在" &ne; "X 现在存在"。
+    </div>
+  </div>
+</section>
+
+<!-- ===== 第4节：会话记忆（Session Memory） ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(244,114,182,0.15);">&#9733;</div>
+    <h2>4. 会话记忆（Session Memory）原理</h2>
+  </div>
+
+  <div class="card">
+    <p><span class="file-ref">src/services/SessionMemory/sessionMemoryUtils.ts</span> &middot; <span class="file-ref">src/services/SessionMemory/prompts.ts</span></p>
+    <h3>状态跟踪变量</h3>
+    <table>
+      <tr><th>变量</th><th>说明</th></tr>
+      <tr><td><code>lastSummarizedMessageId</code></td><td>最后一次提取处理到的消息 UUID</td></tr>
+      <tr><td><code>tokensAtLastExtraction</code></td><td>上次提取时的上下文大小（用于计算增量）</td></tr>
+      <tr><td><code>extractionStartedAt</code></td><td>提取开始时间戳（防止并发）</td></tr>
+      <tr><td><code>sessionMemoryInitialized</code></td><td>是否已过初始化阈值</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>触发决策算法 <code>shouldExtractMemory()</code></h3>
+    <pre>1. 检查初始化阈值
+   if (!initialized && tokens < 10,000) return false
+   else markInitialized()
+
+2. 检查增量阈值
+   hasMetTokenThreshold = (currentTokens - tokensAtLastExtraction) >= 5,000
+
+3. 检查工具调用阈值
+   hasMetToolCallThreshold = toolCallsSinceLastUpdate >= 3
+
+4. 检查最后一轮是否有工具调用
+   hasToolCallsInLastTurn = 最后一条 assistant 消息是否包含 tool_use
+
+5. 决策
+   shouldExtract = (token阈值 AND 工具调用阈值)
+                OR (token阈值 AND 最后一轮无工具调用)
+
+   注意: Token 阈值是必要条件，永远不可跳过</pre>
+    <div class="highlight-box success">
+      <strong>设计意图：</strong>"最后一轮无工具调用" 表示对话到了自然断点（模型给出了文本回复而非继续工具操作），此时提取最安全，不会打断正在进行的工作。
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>笔记文件模板（12 个分区）</h3>
+    <p><span class="file-ref">src/services/SessionMemory/prompts.ts</span></p>
+    <table>
+      <tr><th>分区</th><th>说明</th></tr>
+      <tr><td><strong># Session Title</strong></td><td>5-10 个词，信息密集</td></tr>
+      <tr><td><strong># Current State</strong></td><td>当前工作、待办任务、下一步</td></tr>
+      <tr><td><strong># Task specification</strong></td><td>用户的要求、设计决策</td></tr>
+      <tr><td><strong># Files and Functions</strong></td><td>重要文件、内容、相关性</td></tr>
+      <tr><td><strong># Workflow</strong></td><td>bash 命令、运行顺序、输出解读</td></tr>
+      <tr><td><strong># Errors & Corrections</strong></td><td>错误 + 修复方案、失败的尝试</td></tr>
+      <tr><td><strong># Codebase and System Documentation</strong></td><td>系统组件、交互方式</td></tr>
+      <tr><td><strong># Learnings</strong></td><td>什么有效/无效、什么要避免</td></tr>
+      <tr><td><strong># Key results</strong></td><td>用户要求的确切输出</td></tr>
+      <tr><td><strong># Worklog</strong></td><td>逐步简洁总结</td></tr>
+    </table>
+    <h4>截断控制</h4>
+    <ul>
+      <li>每个分区上限：<strong>2,000 token</strong></li>
+      <li>总计上限：<strong>12,000 token</strong></li>
+      <li>截断时在行边界处切割，追加 <code>[... section truncated for length ...]</code> 标记</li>
+      <li>模板中的分区标题和 <em>斜体描述</em> 必须完整保留，仅编辑描述下方的内容</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>自定义模板</h3>
+    <p>用户可在以下路径放置自定义文件：</p>
+    <ul>
+      <li><code>~/.claude/session-memory/config/template.md</code> &mdash; 自定义笔记模板</li>
+      <li><code>~/.claude/session-memory/config/prompt.md</code> &mdash; 自定义提取提示词</li>
+    </ul>
+    <p>更新提示词中支持的变量替换：<code>{{currentNotes}}</code>、<code>{{notesPath}}</code></p>
+  </div>
+</section>
+
+<!-- ===== 第5节：持久记忆提取 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(108,138,255,0.15);">&#9881;</div>
+    <h2>5. 持久记忆提取（Auto Memory）原理</h2>
+  </div>
+
+  <div class="card">
+    <p><span class="file-ref">src/services/extractMemories/extractMemories.ts</span> &middot; <span class="file-ref">src/services/extractMemories/prompts.ts</span></p>
+    <h3>闭包作用域状态</h3>
+    <p><code>initExtractMemories()</code> 创建一个闭包，所有可变状态封装在内部：</p>
+    <ul>
+      <li><code>lastMemoryMessageUuid</code> &mdash; 游标，每次提取只处理新增消息</li>
+      <li><code>inProgress</code> &mdash; 布尔锁，防止重叠运行</li>
+      <li><code>turnsSinceLastExtraction</code> &mdash; 合格轮次计数器，重置为 0 after each run</li>
+      <li><code>pendingContext</code> &mdash; 暂存的上下文（在运行中有新请求时）</li>
+      <li><code>inFlightExtractions</code> &mdash; Set&lt;Promise&gt;，用于 drain 等待</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>互斥与重叠保护</h3>
+    <pre>新请求到达
+    |
+    v
+inProgress? ----YES----> 暂存到 pendingContext（覆盖式，只保留最新）
+    |                         |
+    NO                    当前运行完成
+    |                         |
+    v                         v
+执行 runExtraction()      有暂存? ---YES--> 执行尾随提取（trailing run）
+    |                                       （游标已前进，只处理增量）
+    v
+提取完成 --> 检查 pendingContext</pre>
+    <div class="highlight-box">
+      <strong>主代理写入互斥：</strong><code>hasMemoryWritesSince()</code> 扫描 assistant 消息中的 Write/Edit 工具调用，如果目标路径在 <code>isAutoMemPath()</code> 内，说明主代理已直接写入记忆，此时跳过后台提取并前移游标。
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>提取提示词设计</h3>
+    <p><span class="file-ref">src/services/extractMemories/prompts.ts</span></p>
+    <h4>关键指令</h4>
+    <ul>
+      <li>指定要分析的消息数量：<code>~${newMessageCount} messages</code></li>
+      <li>列出现有记忆文件清单 &mdash; 指示更新已有文件而非创建重复</li>
+      <li>限制工具使用：Read/Grep/Glob + 只读 Bash + Edit/Write 仅限记忆目录</li>
+      <li>高效轮次预算：<strong>第 1 轮全部 Read，第 2 轮全部 Write</strong>（并行化）</li>
+      <li><strong>禁止代码验证</strong>：仅使用对话中的内容，不去检查代码库</li>
+    </ul>
+    <h4>两步保存流程</h4>
+    <ol>
+      <li>将记忆写入独立文件（如 <code>user_role.md</code>），使用 frontmatter 格式</li>
+      <li>在 <code>MEMORY.md</code> 中添加索引条目（一行，~150 字符）</li>
+    </ol>
+    <h4>团队记忆变体</h4>
+    <p>当 <code>feature('TEAMMEM')</code> 启用时，使用 <code>buildExtractCombinedPrompt()</code>，区分私有/团队记忆目录，每种类型附带 scope 指导。</p>
+  </div>
+
+  <div class="card">
+    <h3>提取后的可见反馈</h3>
+    <p>如果子代理写入了记忆文件（排除 MEMORY.md 索引更新），通过 <code>appendSystemMessage(createMemorySavedMessage(paths))</code> 在 REPL 中显示一条系统消息，让用户知道记忆已保存。</p>
+  </div>
+</section>
+
+<!-- ===== 第6节：Auto Dream（记忆合并） ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(251,191,36,0.15);">&#9729;</div>
+    <h2>6. Auto Dream（记忆合并）</h2>
+  </div>
+
+  <div class="card">
+    <p><span class="file-ref">src/services/autoDream/</span></p>
+    <p>Auto Dream 是一个<strong>后台记忆合并</strong>机制，类似于人类睡眠期间的记忆整理。它会将多个会话中积累的零散记忆合并、去重、精简。</p>
+    <h3>触发门控（从低成本到高成本）</h3>
+    <ol>
+      <li><strong>时间门控</strong>：距上次合并 &ge; <code>minHours</code>（默认 24 小时）</li>
+      <li><strong>会话门控</strong>：自上次合并以来 &ge; <code>minSessions</code> 个新会话（默认 5 个，排除当前会话）</li>
+      <li><strong>锁门控</strong>：没有其他进程正在合并</li>
+    </ol>
+    <h4>扫描节流</h4>
+    <p>当时间门控通过但会话门控未通过时，会话扫描会被节流 <strong>10 分钟</strong>，防止重复的 lock-stat 调用。</p>
+    <h4>锁机制</h4>
+    <p><code>tryAcquireConsolidationLock()</code> 通过原子文件 mtime 更新实现锁。支持回滚（进程被杀时恢复到先前 mtime）。</p>
+  </div>
+
+  <div class="card">
+    <h3>KAIROS 模式的特殊路径</h3>
+    <p>在 KAIROS 模式（永续助手会话）下，使用基于日志的模型：</p>
+    <ul>
+      <li>每天追加日志到 <code>&lt;memdir&gt;/logs/YYYY/MM/YYYY-MM-DD.md</code></li>
+      <li>每晚通过 <code>/dream</code> 技能将日志合并为主题文件 + 更新 MEMORY.md</li>
+      <li>日志缓存模式：模板中不包含字面日期，模型从 <code>currentDate</code> 附件推导（午夜翻转时自动更新）</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 第7节：团队记忆安全机制 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(239,68,68,0.15);">&#9888;</div>
+    <h2>7. 团队记忆安全机制</h2>
+  </div>
+
+  <div class="card">
+    <p><span class="file-ref">src/memdir/teamMemPaths.ts</span></p>
+    <h3>路径遍历防护</h3>
+    <h4><code>sanitizePathKey()</code> 拒绝的模式</h4>
+    <ul>
+      <li>Null 字节</li>
+      <li>URL 编码的遍历：<code>%2e%2e%2f</code> = <code>../</code></li>
+      <li>Unicode 标准化的遍历：全角 <code>.</code> 和 <code>/</code></li>
+      <li>反斜杠（Windows 路径分隔符）</li>
+      <li>绝对路径</li>
+    </ul>
+    <h4><code>validateTeamMemWritePath()</code> 两阶段验证</h4>
+    <ol>
+      <li><strong>字符串级</strong>：检查路径前缀包含关系</li>
+      <li><strong>符号链接解析</strong>：<code>realpathDeepestExisting()</code> 沿目录树向上解析符号链接，确保实际文件系统位置仍在团队记忆目录内</li>
+    </ol>
+    <div class="highlight-box danger">
+      <strong>前缀攻击防护：</strong>要求前缀匹配后紧跟路径分隔符。<code>/foo/team-evil/</code> 不会匹配 <code>/foo/team/</code>。
+    </div>
+  </div>
+</section>
+
+<!-- ===== 第8节：CLAUDE.md 与记忆的交互 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(52,211,153,0.15);">&#9733;</div>
+    <h2>8. CLAUDE.md 与记忆系统的交互</h2>
+  </div>
+
+  <div class="card">
+    <p><span class="file-ref">src/utils/claudemd.ts</span></p>
+    <h3>文件加载优先级（低到高）</h3>
+    <ol>
+      <li><strong>Managed</strong>：<code>/etc/claude-code/CLAUDE.md</code>（全局管理策略）</li>
+      <li><strong>User</strong>：<code>~/.claude/CLAUDE.md</code>（用户全局偏好）</li>
+      <li><strong>Project</strong>：项目根目录的 <code>CLAUDE.md</code>、<code>.claude/CLAUDE.md</code>、<code>.claude/rules/*.md</code></li>
+      <li><strong>Nested</strong>：从 CWD 到 git root 每一级目录的 CLAUDE.md</li>
+      <li><strong>Local</strong>：<code>CLAUDE.local.md</code>（最高优先级，不提交到仓库）</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3>@include 指令</h3>
+    <ul>
+      <li>语法：<code>@path</code>、<code>@./relative</code>、<code>@~/home</code>、<code>@/absolute</code></li>
+      <li>裸 <code>@path</code> 等价于 <code>@./path</code></li>
+      <li>仅在叶文本节点中生效（不在代码块中）</li>
+      <li>内置循环引用防护（通过已处理文件集合追踪）</li>
+      <li>不存在的文件静默忽略</li>
+      <li>被包含的文件作为单独条目插入到包含者之前</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>HTML 注释剥离</h3>
+    <p><code>stripHtmlComments()</code> 使用 marked 词法分析器进行块级检测：</p>
+    <ul>
+      <li>剥离 <code>&lt;!-- ... --&gt;</code> 块注释</li>
+      <li>保留代码块内的注释</li>
+      <li>保留未闭合的注释（避免误删有拼写错误的内容）</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>嵌套记忆附件</h3>
+    <p><code>getNestedMemoryAttachments()</code> 在以下场景触发：</p>
+    <ul>
+      <li>工具操作了某个文件 &rarr; 检查该文件路径是否有关联的条件规则</li>
+      <li>从 CWD 到目标文件路径的每一级目录中查找 CLAUDE.md</li>
+      <li><code>paths</code> frontmatter 字段定义条件匹配模式（如 <code>src/**/*.ts</code>）</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 第9节：完整阈值参考 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(108,138,255,0.15);">&#9881;</div>
+    <h2>9. 完整阈值与限制参考</h2>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>MEMORY.md 入口点</h3>
+      <table>
+        <tr><td>最大行数</td><td><strong>200</strong></td></tr>
+        <tr><td>最大字节</td><td><strong>25,000</strong></td></tr>
+        <tr><td>每条索引建议长度</td><td>~150 字符</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>记忆文件注入</h3>
+      <table>
+        <tr><td>扫描上限</td><td><strong>200 个文件</strong></td></tr>
+        <tr><td>Frontmatter 读取行数</td><td><strong>30 行</strong></td></tr>
+        <tr><td>每文件最大行数</td><td><strong>200 行</strong></td></tr>
+        <tr><td>每文件最大字节</td><td><strong>4,096</strong> (4KB)</td></tr>
+        <tr><td>每轮注入上限</td><td><strong>5 个文件</strong> (~20KB)</td></tr>
+        <tr><td>会话累计注入上限</td><td><strong>61,440</strong> (60KB)</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>会话记忆</h3>
+      <table>
+        <tr><td>初始化阈值</td><td><strong>10,000 token</strong></td></tr>
+        <tr><td>更新增量阈值</td><td><strong>5,000 token</strong></td></tr>
+        <tr><td>工具调用阈值</td><td><strong>3 次</strong></td></tr>
+        <tr><td>每分区上限</td><td><strong>2,000 token</strong></td></tr>
+        <tr><td>总计上限</td><td><strong>12,000 token</strong></td></tr>
+        <tr><td>等待超时</td><td><strong>15 秒</strong></td></tr>
+        <tr><td>陈旧阈值</td><td><strong>1 分钟</strong></td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Auto Dream</h3>
+      <table>
+        <tr><td>最小间隔</td><td><strong>24 小时</strong></td></tr>
+        <tr><td>最小会话数</td><td><strong>5 个</strong></td></tr>
+        <tr><td>扫描节流</td><td><strong>10 分钟</strong></td></tr>
+      </table>
+      <h3>记忆提取子代理</h3>
+      <table>
+        <tr><td>最大轮次</td><td><strong>5</strong></td></tr>
+        <tr><td>排空超时</td><td><strong>60 秒</strong></td></tr>
+        <tr><td>轮次频率</td><td>每 N 轮（默认 1）</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  Claude Code 内存管理原理深度拆解 &mdash; 源码分析 &mdash; 2026-04-08
+</footer>
+
+</body>
+</html>

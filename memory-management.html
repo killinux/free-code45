@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code 内存管理系统架构分析</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d2e;
+    --border: #2a2d3e;
+    --text: #e0e0e0;
+    --text-dim: #8b8fa3;
+    --accent: #6c8aff;
+    --accent2: #a78bfa;
+    --accent3: #34d399;
+    --accent4: #fbbf24;
+    --accent5: #f472b6;
+    --danger: #ef4444;
+    --code-bg: #141620;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 0;
+  }
+  .hero {
+    background: linear-gradient(135deg, #1a1040 0%, #0f1117 50%, #0a1628 100%);
+    padding: 80px 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle at 30% 50%, rgba(108,138,255,0.08) 0%, transparent 50%),
+                radial-gradient(circle at 70% 50%, rgba(167,139,250,0.06) 0%, transparent 50%);
+    animation: drift 20s ease-in-out infinite;
+  }
+  @keyframes drift {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(-2%, 1%); }
+  }
+  .hero h1 {
+    font-size: 2.8em;
+    font-weight: 700;
+    background: linear-gradient(135deg, #6c8aff, #a78bfa, #f472b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    position: relative;
+    margin-bottom: 16px;
+  }
+  .hero p {
+    color: var(--text-dim);
+    font-size: 1.15em;
+    position: relative;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+  .toc {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    margin-bottom: 48px;
+  }
+  .toc h2 {
+    font-size: 1.3em;
+    margin-bottom: 16px;
+    color: var(--accent);
+  }
+  .toc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 8px;
+  }
+  .toc a {
+    color: var(--text-dim);
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.2s;
+    font-size: 0.95em;
+  }
+  .toc a:hover {
+    color: var(--text);
+    background: rgba(108,138,255,0.08);
+  }
+  .toc .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: rgba(108,138,255,0.15);
+    color: var(--accent);
+    font-size: 0.8em;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  section {
+    margin-bottom: 56px;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3em;
+    flex-shrink: 0;
+  }
+  .section-header h2 {
+    font-size: 1.5em;
+    font-weight: 600;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+  .card h3 {
+    font-size: 1.1em;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--accent2);
+  }
+  .card h4 {
+    font-size: 0.95em;
+    font-weight: 600;
+    margin: 16px 0 8px;
+    color: var(--accent3);
+  }
+  .card p, .card li {
+    color: var(--text-dim);
+    font-size: 0.93em;
+    line-height: 1.8;
+  }
+  .card ul, .card ol {
+    padding-left: 20px;
+    margin: 8px 0;
+  }
+  .card li { margin-bottom: 4px; }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 16px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 0.9em;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td { color: var(--text-dim); }
+  tr:last-child td { border-bottom: none; }
+  code {
+    background: var(--code-bg);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.88em;
+    color: var(--accent3);
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    overflow-x: auto;
+    margin: 12px 0;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85em;
+    line-height: 1.7;
+    color: var(--text-dim);
+  }
+  .tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.78em;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+  .tag-blue { background: rgba(108,138,255,0.15); color: var(--accent); }
+  .tag-purple { background: rgba(167,139,250,0.15); color: var(--accent2); }
+  .tag-green { background: rgba(52,211,153,0.15); color: var(--accent3); }
+  .tag-yellow { background: rgba(251,191,36,0.15); color: var(--accent4); }
+  .tag-pink { background: rgba(244,114,182,0.15); color: var(--accent5); }
+  .tag-red { background: rgba(239,68,68,0.15); color: var(--danger); }
+  .highlight-box {
+    border-left: 3px solid var(--accent);
+    background: rgba(108,138,255,0.05);
+    padding: 16px 20px;
+    border-radius: 0 8px 8px 0;
+    margin: 16px 0;
+  }
+  .highlight-box.warn {
+    border-left-color: var(--accent4);
+    background: rgba(251,191,36,0.05);
+  }
+  .highlight-box.danger {
+    border-left-color: var(--danger);
+    background: rgba(239,68,68,0.05);
+  }
+  .flow-diagram {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px;
+    margin: 20px 0;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.82em;
+    line-height: 1.8;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .metric {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 8px 0;
+  }
+  .metric-value {
+    font-size: 1.6em;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .metric-label {
+    color: var(--text-dim);
+    font-size: 0.9em;
+  }
+  .file-ref {
+    color: var(--accent3);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85em;
+  }
+  .layer-bar {
+    display: flex;
+    gap: 4px;
+    margin: 24px 0;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .layer-bar div { height: 100%; border-radius: 2px; }
+  footer {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-dim);
+    font-size: 0.85em;
+    border-top: 1px solid var(--border);
+    margin-top: 40px;
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Claude Code Memory Management</h1>
+  <p>Multi-layered context and memory architecture deep dive, based on source code analysis</p>
+</div>
+
+<div class="container">
+
+<!-- TOC -->
+<div class="toc">
+  <h2>Contents</h2>
+  <div class="toc-grid">
+    <a href="#overview"><span class="num">0</span> Architecture Overview</a>
+    <a href="#token"><span class="num">1</span> Token Metering</a>
+    <a href="#micro"><span class="num">2</span> Micro Compact</a>
+    <a href="#auto-compact"><span class="num">3</span> Auto Compact</a>
+    <a href="#session-memory"><span class="num">4</span> Session Memory</a>
+    <a href="#sm-compact"><span class="num">5</span> Session Memory Compact</a>
+    <a href="#auto-memory"><span class="num">6</span> Auto Memory (Persistent)</a>
+    <a href="#dataflow"><span class="num">7</span> End-to-End Data Flow</a>
+    <a href="#guards"><span class="num">8</span> Safety Guards</a>
+    <a href="#config"><span class="num">9</span> Configuration Reference</a>
+  </div>
+</div>
+
+<!-- Layer bar -->
+<div class="layer-bar">
+  <div style="flex:1; background: var(--accent3);" title="Token Metering"></div>
+  <div style="flex:2; background: var(--accent4);" title="Micro Compact"></div>
+  <div style="flex:3; background: var(--accent);" title="Auto Compact"></div>
+  <div style="flex:3; background: var(--accent2);" title="Session Memory"></div>
+  <div style="flex:2; background: var(--accent5);" title="Auto Memory"></div>
+</div>
+
+<!-- Section 0: Overview -->
+<section id="overview">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(108,138,255,0.15);">&#9881;</div>
+    <h2>Architecture Overview</h2>
+  </div>
+  <div class="card">
+    <p>The memory management system consists of <strong>5 layers</strong> working in concert, from real-time to persistent:</p>
+    <table>
+      <tr>
+        <th>Layer</th><th>Purpose</th><th>Cost</th><th>Persistence</th>
+      </tr>
+      <tr>
+        <td><span class="tag tag-green">Token Metering</span></td>
+        <td>Measure context window utilization</td>
+        <td>Zero (calculation only)</td>
+        <td>Per-request</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-yellow">Micro Compact</span></td>
+        <td>Lightweight tool result eviction</td>
+        <td>Zero / cache_edits API</td>
+        <td>Per-session</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">Auto Compact</span></td>
+        <td>Full conversation summarization</td>
+        <td>1 API call (legacy path)</td>
+        <td>Per-session</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-purple">Session Memory</span></td>
+        <td>Structured session notes for fast compaction</td>
+        <td>Forked agent (cache-shared)</td>
+        <td>Per-session file</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-pink">Auto Memory</span></td>
+        <td>Cross-session durable knowledge</td>
+        <td>Forked agent (cache-shared)</td>
+        <td>Permanent files</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- Section 1: Token Metering -->
+<section id="token">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(52,211,153,0.15);">&#9670;</div>
+    <h2>1. Token Metering</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/utils/tokens.ts</span></p>
+    <h3>Core Function: <code>tokenCountWithEstimation()</code></h3>
+    <p>This is the <strong>canonical</strong> function for measuring context size. All threshold checks (auto-compact, session memory) use it.</p>
+    <h4>Algorithm</h4>
+    <ol>
+      <li>Find the last assistant message with valid <code>usage</code> data</li>
+      <li>Compute full context: <code>input_tokens + cache_creation + cache_read + output_tokens</code></li>
+      <li>Walk back to the <strong>first sibling</strong> with the same <code>message.id</code> (handles parallel tool calls)</li>
+      <li>Add rough estimate for messages after that anchor point</li>
+    </ol>
+    <div class="highlight-box">
+      <strong>Parallel Tool Call Handling:</strong> When the model issues multiple tool calls, streaming emits separate assistant records sharing one <code>message.id</code>. The function walks back to the first sibling to ensure interleaved tool_results are counted.
+    </div>
+    <h4>Related Functions</h4>
+    <table>
+      <tr><th>Function</th><th>Returns</th><th>Use Case</th></tr>
+      <tr>
+        <td><code>getTokenCountFromUsage()</code></td>
+        <td>Full context size from single Usage object</td>
+        <td>Building block for other functions</td>
+      </tr>
+      <tr>
+        <td><code>tokenCountFromLastAPIResponse()</code></td>
+        <td>Full context from last API call</td>
+        <td>Pre-compact baseline measurement</td>
+      </tr>
+      <tr>
+        <td><code>finalContextTokensFromLastResponse()</code></td>
+        <td>input + output (no cache)</td>
+        <td>Task budget remaining computation</td>
+      </tr>
+      <tr>
+        <td><code>messageTokenCountFromLastAPIResponse()</code></td>
+        <td>Output tokens only</td>
+        <td>Measuring single response size (NOT for thresholds)</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- Section 2: Micro Compact -->
+<section id="micro">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(251,191,36,0.15);">&#9729;</div>
+    <h2>2. Micro Compact</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/compact/microCompact.ts</span></p>
+    <p>The lightest form of context reclamation. Runs <strong>before every API call</strong>.</p>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>Path A: Time-Based Trigger</h3>
+      <span class="tag tag-yellow">Direct Mutation</span>
+      <p>When the time gap since the last assistant message exceeds the threshold, the server cache has expired anyway. Directly clears old tool result content.</p>
+      <ul>
+        <li>Replaces content with <code>[Old tool result content cleared]</code></li>
+        <li>Keeps the most recent N tool results (floor at 1)</li>
+        <li>Resets cached MC state since server cache is invalidated</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Path B: Cached Microcompact</h3>
+      <span class="tag tag-blue">Cache Edits API</span>
+      <p>When cache is warm, uses the <code>cache_edits</code> API to delete tool results server-side without invalidating the cached prefix.</p>
+      <ul>
+        <li>Does NOT modify local message content</li>
+        <li>Count-based trigger/keep thresholds from GrowthBook</li>
+        <li>Tracks tool results via <code>CachedMCState</code></li>
+        <li>Queues <code>pendingCacheEdits</code> for the API layer</li>
+      </ul>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Compactable Tools</h3>
+    <p>Only these tool types are eligible for microcompaction:</p>
+    <p>
+      <code>FileRead</code> <code>Bash</code> <code>Grep</code> <code>Glob</code>
+      <code>WebSearch</code> <code>WebFetch</code> <code>FileEdit</code> <code>FileWrite</code>
+    </p>
+  </div>
+</section>
+
+<!-- Section 3: Auto Compact -->
+<section id="auto-compact">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(108,138,255,0.15);">&#9881;</div>
+    <h2>3. Auto Compact</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/compact/autoCompact.ts</span></p>
+    <h3>Threshold Calculation</h3>
+    <pre>effectiveWindow = min(modelWindow, CLAUDE_CODE_AUTO_COMPACT_WINDOW) - 20K
+autoCompactThreshold = effectiveWindow - 13K   // ~93% occupancy
+blockingLimit = effectiveWindow - 3K           // ~98%, blocks user input</pre>
+    <div class="grid-2" style="margin-top: 16px;">
+      <div>
+        <div class="metric">
+          <span class="metric-value">13K</span>
+          <span class="metric-label">AUTOCOMPACT_BUFFER_TOKENS</span>
+        </div>
+        <div class="metric">
+          <span class="metric-value">20K</span>
+          <span class="metric-label">WARNING / ERROR threshold buffer</span>
+        </div>
+      </div>
+      <div>
+        <div class="metric">
+          <span class="metric-value">3K</span>
+          <span class="metric-label">MANUAL_COMPACT_BUFFER (blocking limit)</span>
+        </div>
+        <div class="metric">
+          <span class="metric-value">20K</span>
+          <span class="metric-label">MAX_OUTPUT_TOKENS_FOR_SUMMARY</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Execution Priority</h3>
+    <ol>
+      <li><strong>Session Memory Compact</strong> (zero API cost) &mdash; uses pre-extracted session notes as summary</li>
+      <li><strong>Legacy Compact</strong> (1 API call) &mdash; sends full conversation to LLM for summarization</li>
+    </ol>
+    <h4>Post-Compact Cleanup</h4>
+    <ul>
+      <li>Resets <code>lastSummarizedMessageId</code> (old UUIDs no longer exist)</li>
+      <li><code>runPostCompactCleanup()</code> restores skills and CLAUDE.md files (5KB/skill, 25K total budget)</li>
+      <li>Notifies prompt cache break detection to expect cache read drop</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Circuit Breaker</h3>
+    <div class="highlight-box danger">
+      <strong>MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3</strong><br>
+      After 3 consecutive failures, auto-compact stops retrying for the rest of the session.
+      Background: 1,279 sessions had 50+ consecutive failures (up to 3,272), wasting ~250K API calls/day globally.
+    </div>
+  </div>
+</section>
+
+<!-- Section 4: Session Memory -->
+<section id="session-memory">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(167,139,250,0.15);">&#9998;</div>
+    <h2>4. Session Memory</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/SessionMemory/sessionMemory.ts</span></p>
+    <p>Maintains a structured Markdown file with notes about the current conversation. Runs periodically via a <strong>post-sampling hook</strong>.</p>
+    <h3>Trigger Thresholds</h3>
+    <table>
+      <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+      <tr>
+        <td><code>minimumMessageTokensToInit</code></td>
+        <td>10,000</td>
+        <td>Minimum tokens before first extraction</td>
+      </tr>
+      <tr>
+        <td><code>minimumTokensBetweenUpdate</code></td>
+        <td>5,000</td>
+        <td>Token growth required between extractions</td>
+      </tr>
+      <tr>
+        <td><code>toolCallsBetweenUpdates</code></td>
+        <td>3</td>
+        <td>Minimum tool calls between extractions</td>
+      </tr>
+    </table>
+    <h4>Trigger Logic</h4>
+    <pre>shouldExtract = (tokenThreshold AND toolCallThreshold)
+             OR (tokenThreshold AND noToolCallsInLastTurn)</pre>
+    <p>Token threshold is <strong>always required</strong> &mdash; even if tool call count is met, extraction waits for token growth.</p>
+  </div>
+  <div class="card">
+    <h3>Execution Mechanism</h3>
+    <ol>
+      <li>Check feature gate <code>tengu_session_memory</code> (cached, non-blocking)</li>
+      <li>Create isolated <code>subagentContext</code> to avoid polluting parent cache</li>
+      <li>Set up session memory file at <code>~/.claude/session-memory/MEMORY.md</code></li>
+      <li>Read current memory content via <code>FileReadTool</code></li>
+      <li>Build extraction prompt with <code>buildSessionMemoryUpdatePrompt()</code></li>
+      <li>Run <code>runForkedAgent()</code> with <code>querySource: 'session_memory'</code></li>
+      <li>Agent can ONLY use <code>FileEdit</code> on the exact memory file path</li>
+    </ol>
+    <h4>Memory File Structure (12 Sections)</h4>
+    <p>Session Title, Current State, Task Specification, Files/Functions, Workflow, Errors & Corrections, System Documentation, Learnings, Key Results, Worklog, etc.</p>
+    <ul>
+      <li>Max 2K tokens per section</li>
+      <li>12K tokens total limit</li>
+      <li>Truncated by <code>truncateSessionMemoryForCompact()</code> before use in compaction</li>
+    </ul>
+  </div>
+</section>
+
+<!-- Section 5: SM Compact -->
+<section id="sm-compact">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(108,138,255,0.15);">&#9889;</div>
+    <h2>5. Session Memory Compact</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/compact/sessionMemoryCompact.ts</span></p>
+    <p>Uses existing session memory as the summary instead of calling the API. <strong>Zero API cost.</strong></p>
+    <h3>Message Preservation Config</h3>
+    <table>
+      <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+      <tr><td><code>minTokens</code></td><td>10,000</td><td>Minimum tokens to preserve after compaction</td></tr>
+      <tr><td><code>minTextBlockMessages</code></td><td>5</td><td>Minimum messages with text blocks to keep</td></tr>
+      <tr><td><code>maxTokens</code></td><td>40,000</td><td>Hard cap on preserved tokens</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3><code>calculateMessagesToKeepIndex()</code></h3>
+    <ol>
+      <li>Start from <code>lastSummarizedMessageId + 1</code></li>
+      <li>Expand backwards until meeting BOTH minimums (tokens AND text-block messages)</li>
+      <li>Stop if hitting <code>maxTokens</code> cap</li>
+      <li>Floor at the last compact boundary marker</li>
+      <li>Call <code>adjustIndexToPreserveAPIInvariants()</code></li>
+    </ol>
+    <h4><code>adjustIndexToPreserveAPIInvariants()</code></h4>
+    <p>Ensures no <code>tool_use</code>/<code>tool_result</code> pairs are split and thinking blocks sharing the same <code>message.id</code> are included.</p>
+    <div class="highlight-box warn">
+      <strong>Bug scenario it fixes:</strong> Streaming emits separate records per content block with same <code>message.id</code>. If the slice boundary lands between split records, <code>normalizeMessagesForAPI</code> merges them and creates orphan <code>tool_result</code> references &rarr; API error.
+    </div>
+  </div>
+  <div class="card">
+    <h3>Two Scenarios</h3>
+    <div class="grid-2">
+      <div>
+        <h4>Normal Case</h4>
+        <p><code>lastSummarizedMessageId</code> is set. Keep only messages after that ID, expanded to meet minimums.</p>
+      </div>
+      <div>
+        <h4>Resumed Session</h4>
+        <p><code>lastSummarizedMessageId</code> is not set but session memory has content. Keep all messages but use session memory as summary.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Section 6: Auto Memory -->
+<section id="auto-memory">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(244,114,182,0.15);">&#9733;</div>
+    <h2>6. Auto Memory (Persistent)</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/extractMemories/extractMemories.ts</span></p>
+    <p>Extracts durable memories from the session and writes them to <code>~/.claude/projects/&lt;path&gt;/memory/</code>. Runs at the <strong>end of each complete query loop</strong>.</p>
+    <h3>Trigger Conditions</h3>
+    <ul>
+      <li>Last assistant turn has <strong>no tool calls</strong> (natural conversation break)</li>
+      <li>Called via <code>handleStopHooks()</code></li>
+      <li>Only for the main agent (not subagents)</li>
+      <li>Throttled: every N eligible turns (<code>tengu_bramble_lintel</code>, default 1)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Execution Design</h3>
+    <h4>Mutual Exclusion</h4>
+    <p>If the main agent already wrote to memory files this turn, the background extraction is skipped and the cursor advances past the range.</p>
+    <h4>Overlap Protection</h4>
+    <p>If a new extraction request arrives while one is in-progress, the context is <strong>stashed</strong>. After the current run finishes, one trailing extraction runs with the latest stashed context.</p>
+    <h4>Resource Limits</h4>
+    <ul>
+      <li><strong>maxTurns: 5</strong> &mdash; hard cap prevents verification rabbit-holes</li>
+      <li><strong>drain timeout: 60s</strong> &mdash; <code>drainPendingExtraction()</code> waits before graceful shutdown</li>
+      <li><strong>skipTranscript: true</strong> &mdash; avoids race conditions with main thread</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Permission Model</h3>
+    <p><code>createAutoMemCanUseTool()</code> defines a strict sandbox:</p>
+    <table>
+      <tr><th>Tool</th><th>Permission</th></tr>
+      <tr><td><code>FileRead</code>, <code>Grep</code>, <code>Glob</code></td><td><span class="tag tag-green">Unrestricted</span> (read-only)</td></tr>
+      <tr><td><code>Bash</code></td><td><span class="tag tag-yellow">Read-only commands only</span> (ls, find, grep, cat, stat, wc, head, tail)</td></tr>
+      <tr><td><code>FileEdit</code>, <code>FileWrite</code></td><td><span class="tag tag-red">Memory directory only</span></td></tr>
+      <tr><td><code>REPL</code></td><td><span class="tag tag-blue">Allowed</span> (inner primitives still gated)</td></tr>
+      <tr><td>All others</td><td><span class="tag tag-red">Denied</span></td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- Section 7: Data Flow -->
+<section id="dataflow">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(52,211,153,0.15);">&#8644;</div>
+    <h2>7. End-to-End Data Flow</h2>
+  </div>
+  <div class="card">
+    <div class="flow-diagram">User Message
+    |
+    v
++---------------------+
+|   microcompact      |  <-- Before API call
+|   Messages          |
+|   (Time-based or    |
+|    Cached MC)       |
++---------------------+
+    |
+    v
++---------------------+
+|   API Sampling      |  <-- Send to Claude
+|   (with cache_edits |
+|    if pending)      |
++---------------------+
+    |
+    v
++---------------------+
+|  postSamplingHook:  |  <-- After each API response
+|  Session Memory     |
+|  Extraction         |
+|  (if thresholds met)|
++---------------------+
+    |
+    v
++---------------------+
+|  shouldAutoCompact? |  <-- Token usage > ~93%
+|                     |
+|  YES:               |
+|  1. Try SM Compact  |  (zero API cost, use session notes)
+|  2. Try Legacy      |  (1 API call, full summarization)
+|                     |
+|  NO: continue       |
++---------------------+
+    |
+    v
++---------------------+
+|  Tool Execution     |  <-- Execute tool calls
+|  Loop               |
++---------------------+
+    |
+    v  (when no more tool calls)
++---------------------+
+|  handleStopHooks:   |  <-- Turn complete
+|  extractMemories    |
+|  (background fork)  |
+|                     |
+|  Write to:          |
+|  ~/.claude/projects |
+|  /&lt;path&gt;/memory/    |
++---------------------+</div>
+  </div>
+</section>
+
+<!-- Section 8: Safety Guards -->
+<section id="guards">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(239,68,68,0.15);">&#9888;</div>
+    <h2>8. Safety Guards</h2>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>Recursion Prevention</h3>
+      <p>These <code>querySource</code> values are blocked from triggering auto-compact:</p>
+      <ul>
+        <li><code>session_memory</code> &mdash; would deadlock (forked agent)</li>
+        <li><code>compact</code> &mdash; would deadlock (forked agent)</li>
+        <li><code>marble_origami</code> &mdash; context-collapse agent, module-level state conflict</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Circuit Breaker</h3>
+      <ul>
+        <li>After 3 consecutive auto-compact failures, stops retrying</li>
+        <li>Prevents API hammering when context is irrecoverably over limit</li>
+        <li>Resets on success</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>API Invariant Protection</h3>
+      <ul>
+        <li><code>tool_use</code> / <code>tool_result</code> pairs are never split</li>
+        <li>Thinking blocks sharing <code>message.id</code> are always included together</li>
+        <li>Compact boundary markers filtered from <code>messagesToKeep</code> to prevent double-prune</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Mutual Exclusion</h3>
+      <ul>
+        <li>Session Memory extraction uses <code>sequential()</code> wrapper</li>
+        <li>Auto Memory skips if main agent wrote memory this turn</li>
+        <li>Overlap: stash context, run one trailing extraction</li>
+        <li>Context Collapse and Reactive Compact disable proactive auto-compact</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Section 9: Config Reference -->
+<section id="config">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(251,191,36,0.15);">&#9881;</div>
+    <h2>9. Configuration Reference</h2>
+  </div>
+  <div class="card">
+    <h3>Environment Variables</h3>
+    <table>
+      <tr><th>Variable</th><th>Effect</th></tr>
+      <tr><td><code>DISABLE_COMPACT</code></td><td>Disable all compaction (auto + manual)</td></tr>
+      <tr><td><code>DISABLE_AUTO_COMPACT</code></td><td>Disable auto-compact only (manual <code>/compact</code> still works)</td></tr>
+      <tr><td><code>CLAUDE_AUTOCOMPACT_PCT_OVERRIDE</code></td><td>Override auto-compact threshold as percentage (0-100)</td></tr>
+      <tr><td><code>CLAUDE_CODE_AUTO_COMPACT_WINDOW</code></td><td>Override effective context window size</td></tr>
+      <tr><td><code>CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE</code></td><td>Override blocking limit threshold</td></tr>
+      <tr><td><code>ENABLE_CLAUDE_CODE_SM_COMPACT</code></td><td>Force enable session memory compaction</td></tr>
+      <tr><td><code>DISABLE_CLAUDE_CODE_SM_COMPACT</code></td><td>Force disable session memory compaction</td></tr>
+      <tr><td><code>CLAUDE_CODE_DISABLE_AUTO_MEMORY</code></td><td>Disable auto memory extraction</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Feature Flags (GrowthBook)</h3>
+    <table>
+      <tr><th>Flag</th><th>Controls</th></tr>
+      <tr><td><code>tengu_session_memory</code></td><td>Session memory extraction gate</td></tr>
+      <tr><td><code>tengu_sm_compact</code></td><td>Session memory compaction gate</td></tr>
+      <tr><td><code>tengu_sm_config</code></td><td>Session memory thresholds (dynamic config)</td></tr>
+      <tr><td><code>tengu_sm_compact_config</code></td><td>SM compact thresholds (dynamic config)</td></tr>
+      <tr><td><code>tengu_passport_quail</code></td><td>Auto memory extraction gate</td></tr>
+      <tr><td><code>tengu_bramble_lintel</code></td><td>Extraction turn frequency (default 1 = every turn)</td></tr>
+      <tr><td><code>tengu_cobalt_raccoon</code></td><td>Reactive compact mode (suppresses proactive auto-compact)</td></tr>
+      <tr><td><code>tengu_moth_copse</code></td><td>Skip MEMORY.md index in extraction</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Key Source Files</h3>
+    <table>
+      <tr><th>File</th><th>Responsibility</th></tr>
+      <tr><td><code>src/utils/tokens.ts</code></td><td>Token counting and context estimation</td></tr>
+      <tr><td><code>src/utils/context.ts</code></td><td>Context window configuration</td></tr>
+      <tr><td><code>src/services/compact/autoCompact.ts</code></td><td>Auto-compact orchestration and thresholds</td></tr>
+      <tr><td><code>src/services/compact/compact.ts</code></td><td>Legacy compaction algorithm</td></tr>
+      <tr><td><code>src/services/compact/sessionMemoryCompact.ts</code></td><td>Session memory compaction</td></tr>
+      <tr><td><code>src/services/compact/microCompact.ts</code></td><td>Tool result microcompaction</td></tr>
+      <tr><td><code>src/services/SessionMemory/sessionMemory.ts</code></td><td>Session memory extraction</td></tr>
+      <tr><td><code>src/services/SessionMemory/sessionMemoryUtils.ts</code></td><td>Session memory state tracking</td></tr>
+      <tr><td><code>src/services/extractMemories/extractMemories.ts</code></td><td>Persistent auto-memory extraction</td></tr>
+      <tr><td><code>src/memdir/memdir.ts</code></td><td>MEMORY.md index management</td></tr>
+      <tr><td><code>src/memdir/paths.ts</code></td><td>Auto-memory directory resolution</td></tr>
+    </table>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  Claude Code Memory Management Architecture &mdash; Source Code Analysis &mdash; 2026-04-08
+</footer>
+
+</body>
+</html>

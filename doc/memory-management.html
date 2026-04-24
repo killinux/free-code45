@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code 内存管理系统架构分析</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d2e;
+    --border: #2a2d3e;
+    --text: #e0e0e0;
+    --text-dim: #8b8fa3;
+    --accent: #6c8aff;
+    --accent2: #a78bfa;
+    --accent3: #34d399;
+    --accent4: #fbbf24;
+    --accent5: #f472b6;
+    --danger: #ef4444;
+    --code-bg: #141620;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 0;
+  }
+  .hero {
+    background: linear-gradient(135deg, #1a1040 0%, #0f1117 50%, #0a1628 100%);
+    padding: 80px 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle at 30% 50%, rgba(108,138,255,0.08) 0%, transparent 50%),
+                radial-gradient(circle at 70% 50%, rgba(167,139,250,0.06) 0%, transparent 50%);
+    animation: drift 20s ease-in-out infinite;
+  }
+  @keyframes drift {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(-2%, 1%); }
+  }
+  .hero h1 {
+    font-size: 2.8em;
+    font-weight: 700;
+    background: linear-gradient(135deg, #6c8aff, #a78bfa, #f472b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    position: relative;
+    margin-bottom: 16px;
+  }
+  .hero p {
+    color: var(--text-dim);
+    font-size: 1.15em;
+    position: relative;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+  .toc {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    margin-bottom: 48px;
+  }
+  .toc h2 {
+    font-size: 1.3em;
+    margin-bottom: 16px;
+    color: var(--accent);
+  }
+  .toc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 8px;
+  }
+  .toc a {
+    color: var(--text-dim);
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.2s;
+    font-size: 0.95em;
+  }
+  .toc a:hover {
+    color: var(--text);
+    background: rgba(108,138,255,0.08);
+  }
+  .toc .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: rgba(108,138,255,0.15);
+    color: var(--accent);
+    font-size: 0.8em;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  section {
+    margin-bottom: 56px;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3em;
+    flex-shrink: 0;
+  }
+  .section-header h2 {
+    font-size: 1.5em;
+    font-weight: 600;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+  .card h3 {
+    font-size: 1.1em;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--accent2);
+  }
+  .card h4 {
+    font-size: 0.95em;
+    font-weight: 600;
+    margin: 16px 0 8px;
+    color: var(--accent3);
+  }
+  .card p, .card li {
+    color: var(--text-dim);
+    font-size: 0.93em;
+    line-height: 1.8;
+  }
+  .card ul, .card ol {
+    padding-left: 20px;
+    margin: 8px 0;
+  }
+  .card li { margin-bottom: 4px; }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 16px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 0.9em;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td { color: var(--text-dim); }
+  tr:last-child td { border-bottom: none; }
+  code {
+    background: var(--code-bg);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.88em;
+    color: var(--accent3);
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    overflow-x: auto;
+    margin: 12px 0;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85em;
+    line-height: 1.7;
+    color: var(--text-dim);
+  }
+  .tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.78em;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+  .tag-blue { background: rgba(108,138,255,0.15); color: var(--accent); }
+  .tag-purple { background: rgba(167,139,250,0.15); color: var(--accent2); }
+  .tag-green { background: rgba(52,211,153,0.15); color: var(--accent3); }
+  .tag-yellow { background: rgba(251,191,36,0.15); color: var(--accent4); }
+  .tag-pink { background: rgba(244,114,182,0.15); color: var(--accent5); }
+  .tag-red { background: rgba(239,68,68,0.15); color: var(--danger); }
+  .highlight-box {
+    border-left: 3px solid var(--accent);
+    background: rgba(108,138,255,0.05);
+    padding: 16px 20px;
+    border-radius: 0 8px 8px 0;
+    margin: 16px 0;
+  }
+  .highlight-box.warn {
+    border-left-color: var(--accent4);
+    background: rgba(251,191,36,0.05);
+  }
+  .highlight-box.danger {
+    border-left-color: var(--danger);
+    background: rgba(239,68,68,0.05);
+  }
+  .flow-diagram {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px;
+    margin: 20px 0;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.82em;
+    line-height: 1.8;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .metric {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 8px 0;
+  }
+  .metric-value {
+    font-size: 1.6em;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .metric-label {
+    color: var(--text-dim);
+    font-size: 0.9em;
+  }
+  .file-ref {
+    color: var(--accent3);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85em;
+  }
+  .layer-bar {
+    display: flex;
+    gap: 4px;
+    margin: 24px 0;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .layer-bar div { height: 100%; border-radius: 2px; }
+  footer {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-dim);
+    font-size: 0.85em;
+    border-top: 1px solid var(--border);
+    margin-top: 40px;
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Claude Code 内存管理系统架构</h1>
+  <p>基于源码分析的多层上下文与内存管理架构深度解读</p>
+</div>
+
+<div class="container">
+
+<!-- 目录 -->
+<div class="toc">
+  <h2>目录</h2>
+  <div class="toc-grid">
+    <a href="#overview"><span class="num">0</span> 架构总览</a>
+    <a href="#token"><span class="num">1</span> Token 计量层</a>
+    <a href="#micro"><span class="num">2</span> 微压缩（Micro Compact）</a>
+    <a href="#auto-compact"><span class="num">3</span> 自动压缩（Auto Compact）</a>
+    <a href="#session-memory"><span class="num">4</span> 会话记忆（Session Memory）</a>
+    <a href="#sm-compact"><span class="num">5</span> 会话记忆压缩（SM Compact）</a>
+    <a href="#auto-memory"><span class="num">6</span> 持久记忆（Auto Memory）</a>
+    <a href="#dataflow"><span class="num">7</span> 端到端数据流</a>
+    <a href="#guards"><span class="num">8</span> 安全防护机制</a>
+    <a href="#config"><span class="num">9</span> 配置参考</a>
+  </div>
+</div>
+
+<!-- 层级条 -->
+<div class="layer-bar">
+  <div style="flex:1; background: var(--accent3);" title="Token 计量"></div>
+  <div style="flex:2; background: var(--accent4);" title="微压缩"></div>
+  <div style="flex:3; background: var(--accent);" title="自动压缩"></div>
+  <div style="flex:3; background: var(--accent2);" title="会话记忆"></div>
+  <div style="flex:2; background: var(--accent5);" title="持久记忆"></div>
+</div>
+
+<!-- 第0节：架构总览 -->
+<section id="overview">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(108,138,255,0.15);">&#9881;</div>
+    <h2>架构总览</h2>
+  </div>
+  <div class="card">
+    <p>内存管理系统由 <strong>5 个层次</strong> 协同工作，从实时计算到持久化存储层层递进：</p>
+    <table>
+      <tr>
+        <th>层次</th><th>职责</th><th>开销</th><th>持久性</th>
+      </tr>
+      <tr>
+        <td><span class="tag tag-green">Token 计量</span></td>
+        <td>度量上下文窗口使用率</td>
+        <td>零（仅计算）</td>
+        <td>每次请求</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-yellow">微压缩</span></td>
+        <td>轻量级工具结果清理</td>
+        <td>零 / cache_edits API</td>
+        <td>会话内</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">自动压缩</span></td>
+        <td>完整对话摘要化</td>
+        <td>1 次 API 调用（传统路径）</td>
+        <td>会话内</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-purple">会话记忆</span></td>
+        <td>结构化会话笔记，用于快速压缩</td>
+        <td>分叉子代理（共享缓存）</td>
+        <td>会话文件</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-pink">持久记忆</span></td>
+        <td>跨会话的持久化知识</td>
+        <td>分叉子代理（共享缓存）</td>
+        <td>永久文件</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- 第1节：Token 计量层 -->
+<section id="token">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(52,211,153,0.15);">&#9670;</div>
+    <h2>1. Token 计量层</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/utils/tokens.ts</span></p>
+    <h3>核心函数：<code>tokenCountWithEstimation()</code></h3>
+    <p>这是度量上下文大小的<strong>标准函数</strong>。所有阈值判断（自动压缩、会话记忆等）都使用它。</p>
+    <h4>算法流程</h4>
+    <ol>
+      <li>从消息列表末尾向前查找最后一条包含有效 <code>usage</code> 数据的 assistant 消息</li>
+      <li>计算完整上下文大小：<code>input_tokens + cache_creation + cache_read + output_tokens</code></li>
+      <li>回溯到具有相同 <code>message.id</code> 的<strong>第一条同源记录</strong>（处理并行工具调用场景）</li>
+      <li>对锚点之后的新增消息进行粗略估算并累加</li>
+    </ol>
+    <div class="highlight-box">
+      <strong>并行工具调用处理：</strong>当模型发起多个工具调用时，流式输出会将同一个 <code>message.id</code> 拆分成多条 assistant 记录。该函数会回溯到第一条同源记录，确保夹在中间的 tool_result 不被遗漏。
+    </div>
+    <h4>相关函数</h4>
+    <table>
+      <tr><th>函数</th><th>返回值</th><th>用途</th></tr>
+      <tr>
+        <td><code>getTokenCountFromUsage()</code></td>
+        <td>从单个 Usage 对象计算完整上下文大小</td>
+        <td>其他函数的基础构建块</td>
+      </tr>
+      <tr>
+        <td><code>tokenCountFromLastAPIResponse()</code></td>
+        <td>最后一次 API 调用的完整上下文大小</td>
+        <td>压缩前的基线测量</td>
+      </tr>
+      <tr>
+        <td><code>finalContextTokensFromLastResponse()</code></td>
+        <td>input + output（不含缓存）</td>
+        <td>任务预算剩余量计算</td>
+      </tr>
+      <tr>
+        <td><code>messageTokenCountFromLastAPIResponse()</code></td>
+        <td>仅输出 token 数</td>
+        <td>度量单次回复大小（不可用于阈值判断）</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- 第2节：微压缩 -->
+<section id="micro">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(251,191,36,0.15);">&#9729;</div>
+    <h2>2. 微压缩（Micro Compact）</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/compact/microCompact.ts</span></p>
+    <p>最轻量的上下文回收方式，在<strong>每次 API 调用前</strong>执行。</p>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>路径 A：基于时间触发</h3>
+      <span class="tag tag-yellow">直接修改消息</span>
+      <p>当距上一条 assistant 消息的时间间隔超过阈值时，服务端缓存已经过期，因此直接清除旧的工具结果内容。</p>
+      <ul>
+        <li>将内容替换为 <code>[Old tool result content cleared]</code></li>
+        <li>保留最近 N 个工具结果（最少保留 1 个）</li>
+        <li>重置缓存微压缩状态（因为服务端缓存已失效）</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>路径 B：缓存编辑微压缩</h3>
+      <span class="tag tag-blue">Cache Edits API</span>
+      <p>当缓存仍然有效时，通过 <code>cache_edits</code> API 在服务端删除工具结果，不破坏已缓存的前缀。</p>
+      <ul>
+        <li>不修改本地消息内容</li>
+        <li>触发/保留阈值由 GrowthBook 远程配置控制</li>
+        <li>通过 <code>CachedMCState</code> 跟踪工具结果</li>
+        <li>将 <code>pendingCacheEdits</code> 排队等待 API 层处理</li>
+      </ul>
+    </div>
+  </div>
+  <div class="card">
+    <h3>可压缩的工具类型</h3>
+    <p>仅以下工具类型的结果可以被微压缩：</p>
+    <p>
+      <code>FileRead</code> <code>Bash</code> <code>Grep</code> <code>Glob</code>
+      <code>WebSearch</code> <code>WebFetch</code> <code>FileEdit</code> <code>FileWrite</code>
+    </p>
+  </div>
+</section>
+
+<!-- 第3节：自动压缩 -->
+<section id="auto-compact">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(108,138,255,0.15);">&#9881;</div>
+    <h2>3. 自动压缩（Auto Compact）</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/compact/autoCompact.ts</span></p>
+    <h3>阈值计算</h3>
+    <pre>有效窗口 = min(模型窗口大小, CLAUDE_CODE_AUTO_COMPACT_WINDOW) - 20K（输出预留）
+自动压缩阈值 = 有效窗口 - 13K   // 约 93% 占用率时触发
+阻塞限制 = 有效窗口 - 3K       // 约 98%，阻塞用户输入</pre>
+    <div class="grid-2" style="margin-top: 16px;">
+      <div>
+        <div class="metric">
+          <span class="metric-value">13K</span>
+          <span class="metric-label">自动压缩缓冲 Token 数</span>
+        </div>
+        <div class="metric">
+          <span class="metric-value">20K</span>
+          <span class="metric-label">警告/错误阈值缓冲</span>
+        </div>
+      </div>
+      <div>
+        <div class="metric">
+          <span class="metric-value">3K</span>
+          <span class="metric-label">手动压缩缓冲（阻塞限制）</span>
+        </div>
+        <div class="metric">
+          <span class="metric-value">20K</span>
+          <span class="metric-label">摘要最大输出 Token 数</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>执行优先级</h3>
+    <ol>
+      <li><strong>会话记忆压缩</strong>（零 API 开销）&mdash; 使用已提取的会话笔记作为摘要</li>
+      <li><strong>传统压缩</strong>（1 次 API 调用）&mdash; 将完整对话发送给 LLM 生成摘要</li>
+    </ol>
+    <h4>压缩后清理</h4>
+    <ul>
+      <li>重置 <code>lastSummarizedMessageId</code>（旧的 UUID 在压缩后不再存在）</li>
+      <li><code>runPostCompactCleanup()</code> 恢复技能和 CLAUDE.md 文件（每个技能 5KB，总预算 25K）</li>
+      <li>通知 prompt 缓存中断检测器，预期缓存读取量会下降</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>熔断器机制</h3>
+    <div class="highlight-box danger">
+      <strong>最大连续失败次数 = 3</strong><br>
+      连续失败 3 次后，自动压缩在本次会话的剩余时间内停止重试。
+      背景：曾有 1,279 个会话连续失败 50 次以上（最多达 3,272 次），全球每天浪费约 25 万次 API 调用。
+    </div>
+  </div>
+</section>
+
+<!-- 第4节：会话记忆 -->
+<section id="session-memory">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(167,139,250,0.15);">&#9998;</div>
+    <h2>4. 会话记忆（Session Memory）</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/SessionMemory/sessionMemory.ts</span></p>
+    <p>维护一个结构化的 Markdown 文件，记录当前对话的关键信息。通过<strong>采样后钩子（post-sampling hook）</strong>定期运行。</p>
+    <h3>触发阈值</h3>
+    <table>
+      <tr><th>参数</th><th>默认值</th><th>说明</th></tr>
+      <tr>
+        <td><code>minimumMessageTokensToInit</code></td>
+        <td>10,000</td>
+        <td>首次触发提取所需的最低 token 数</td>
+      </tr>
+      <tr>
+        <td><code>minimumTokensBetweenUpdate</code></td>
+        <td>5,000</td>
+        <td>两次提取之间所需的 token 增量</td>
+      </tr>
+      <tr>
+        <td><code>toolCallsBetweenUpdates</code></td>
+        <td>3</td>
+        <td>两次提取之间所需的最少工具调用次数</td>
+      </tr>
+    </table>
+    <h4>触发逻辑</h4>
+    <pre>是否提取 = (满足 token 阈值 AND 满足工具调用阈值)
+         OR (满足 token 阈值 AND 最后一轮没有工具调用)</pre>
+    <p>Token 阈值是<strong>必要条件</strong> &mdash; 即使工具调用次数达标，也必须等到 token 增长满足要求才会触发提取。</p>
+  </div>
+  <div class="card">
+    <h3>执行机制</h3>
+    <ol>
+      <li>检查特性开关 <code>tengu_session_memory</code>（缓存值，非阻塞）</li>
+      <li>创建隔离的 <code>subagentContext</code>，避免污染父级缓存</li>
+      <li>在 <code>~/.claude/session-memory/MEMORY.md</code> 设置会话记忆文件</li>
+      <li>通过 <code>FileReadTool</code> 读取当前记忆内容</li>
+      <li>使用 <code>buildSessionMemoryUpdatePrompt()</code> 构建提取提示词</li>
+      <li>通过 <code>runForkedAgent()</code> 运行分叉子代理，<code>querySource: 'session_memory'</code></li>
+      <li>子代理仅允许使用 <code>FileEdit</code> 编辑指定的记忆文件</li>
+    </ol>
+    <h4>记忆文件结构（12 个分区）</h4>
+    <p>会话标题、当前状态、任务规格、文件/函数、工作流、错误与修正、系统文档、经验总结、关键成果、工作日志等。</p>
+    <ul>
+      <li>每个分区上限 2K token</li>
+      <li>总计 12K token 限制</li>
+      <li>在用于压缩前由 <code>truncateSessionMemoryForCompact()</code> 截断超长分区</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 第5节：会话记忆压缩 -->
+<section id="sm-compact">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(108,138,255,0.15);">&#9889;</div>
+    <h2>5. 会话记忆压缩（SM Compact）</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/compact/sessionMemoryCompact.ts</span></p>
+    <p>使用已有的会话记忆作为摘要，替代调用 API 生成摘要。<strong>零 API 开销。</strong></p>
+    <h3>消息保留配置</h3>
+    <table>
+      <tr><th>参数</th><th>默认值</th><th>说明</th></tr>
+      <tr><td><code>minTokens</code></td><td>10,000</td><td>压缩后最少保留的 token 数</td></tr>
+      <tr><td><code>minTextBlockMessages</code></td><td>5</td><td>最少保留的包含文本内容的消息数</td></tr>
+      <tr><td><code>maxTokens</code></td><td>40,000</td><td>保留 token 数的硬上限</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3><code>calculateMessagesToKeepIndex()</code> 算法</h3>
+    <ol>
+      <li>从 <code>lastSummarizedMessageId + 1</code> 开始</li>
+      <li>向前扩展，直到同时满足两个最低保留量（token 数和文本消息数）</li>
+      <li>达到 <code>maxTokens</code> 硬上限时停止</li>
+      <li>不越过最后一个压缩边界标记</li>
+      <li>调用 <code>adjustIndexToPreserveAPIInvariants()</code> 调整索引</li>
+    </ol>
+    <h4><code>adjustIndexToPreserveAPIInvariants()</code> 的作用</h4>
+    <p>确保 <code>tool_use</code>/<code>tool_result</code> 配对不被拆分，且共享同一 <code>message.id</code> 的思考块（thinking blocks）会被一起保留。</p>
+    <div class="highlight-box warn">
+      <strong>该函数修复的 Bug 场景：</strong>流式输出将同一 <code>message.id</code> 的内容拆分为多条记录。如果切割边界恰好落在拆分记录之间，<code>normalizeMessagesForAPI</code> 合并时会产生孤立的 <code>tool_result</code> 引用，导致 API 报错。
+    </div>
+  </div>
+  <div class="card">
+    <h3>两种场景</h3>
+    <div class="grid-2">
+      <div>
+        <h4>正常情况</h4>
+        <p><code>lastSummarizedMessageId</code> 已设置。仅保留该 ID 之后的消息，并向前扩展以满足最低保留量。</p>
+      </div>
+      <div>
+        <h4>恢复会话</h4>
+        <p><code>lastSummarizedMessageId</code> 未设置，但会话记忆已有内容。保留所有消息，使用会话记忆作为摘要。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 第6节：持久记忆 -->
+<section id="auto-memory">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(244,114,182,0.15);">&#9733;</div>
+    <h2>6. 持久记忆（Auto Memory）</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/extractMemories/extractMemories.ts</span></p>
+    <p>从当前会话中提取持久化记忆，写入 <code>~/.claude/projects/&lt;path&gt;/memory/</code> 目录。在每轮<strong>完整查询循环结束时</strong>运行。</p>
+    <h3>触发条件</h3>
+    <ul>
+      <li>最后一轮 assistant 回复<strong>不包含工具调用</strong>（自然对话断点）</li>
+      <li>通过 <code>handleStopHooks()</code> 调用</li>
+      <li>仅对主代理生效（子代理不触发）</li>
+      <li>节流控制：每 N 个合格轮次执行一次（<code>tengu_bramble_lintel</code>，默认 1）</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>执行设计</h3>
+    <h4>互斥机制</h4>
+    <p>如果主代理本轮已经直接写入了 memory 文件，后台提取会被跳过，同时游标前移跳过该范围。</p>
+    <h4>重叠保护</h4>
+    <p>如果在提取进行中有新的请求到来，上下文会被<strong>暂存</strong>。当前提取完成后，会用最新的暂存上下文执行一次尾随提取。</p>
+    <h4>资源限制</h4>
+    <ul>
+      <li><strong>maxTurns: 5</strong> &mdash; 硬限制，防止子代理陷入验证循环</li>
+      <li><strong>排空超时: 60 秒</strong> &mdash; <code>drainPendingExtraction()</code> 在优雅关闭前等待后台提取完成</li>
+      <li><strong>skipTranscript: true</strong> &mdash; 避免与主线程产生竞态条件</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>权限模型</h3>
+    <p><code>createAutoMemCanUseTool()</code> 定义了严格的沙箱环境：</p>
+    <table>
+      <tr><th>工具</th><th>权限</th></tr>
+      <tr><td><code>FileRead</code>、<code>Grep</code>、<code>Glob</code></td><td><span class="tag tag-green">不限制</span>（只读操作）</td></tr>
+      <tr><td><code>Bash</code></td><td><span class="tag tag-yellow">仅限只读命令</span>（ls、find、grep、cat、stat、wc、head、tail）</td></tr>
+      <tr><td><code>FileEdit</code>、<code>FileWrite</code></td><td><span class="tag tag-red">仅限 memory 目录</span></td></tr>
+      <tr><td><code>REPL</code></td><td><span class="tag tag-blue">允许</span>（内部原语仍受上述规则限制）</td></tr>
+      <tr><td>其他所有工具</td><td><span class="tag tag-red">拒绝</span></td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- 第7节：端到端数据流 -->
+<section id="dataflow">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(52,211,153,0.15);">&#8644;</div>
+    <h2>7. 端到端数据流</h2>
+  </div>
+  <div class="card">
+    <div class="flow-diagram">用户消息
+    |
+    v
++-------------------------+
+|   微压缩消息            |  <-- API 调用前执行
+|   (基于时间触发          |
+|    或缓存编辑)           |
++-------------------------+
+    |
+    v
++-------------------------+
+|   API 采样              |  <-- 发送给 Claude
+|   (如有待处理的          |
+|    cache_edits 一并发送) |
++-------------------------+
+    |
+    v
++-------------------------+
+|  采样后钩子:             |  <-- 每次 API 响应后
+|  会话记忆提取            |
+|  (满足阈值时触发)        |
++-------------------------+
+    |
+    v
++-------------------------+
+|  是否需要自动压缩?       |  <-- Token 使用量 > ~93%
+|                         |
+|  是:                     |
+|  1. 尝试会话记忆压缩     |  (零 API 开销，使用会话笔记)
+|  2. 尝试传统压缩         |  (1 次 API 调用，完整摘要)
+|                         |
+|  否: 继续               |
++-------------------------+
+    |
+    v
++-------------------------+
+|  工具执行循环            |  <-- 执行工具调用
++-------------------------+
+    |
+    v  (无更多工具调用时)
++-------------------------+
+|  停止钩子:               |  <-- 本轮结束
+|  提取持久记忆            |
+|  (后台分叉子代理)        |
+|                         |
+|  写入路径:               |
+|  ~/.claude/projects      |
+|  /&lt;path&gt;/memory/         |
++-------------------------+</div>
+  </div>
+</section>
+
+<!-- 第8节：安全防护机制 -->
+<section id="guards">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(239,68,68,0.15);">&#9888;</div>
+    <h2>8. 安全防护机制</h2>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>递归防护</h3>
+      <p>以下 <code>querySource</code> 值会被禁止触发自动压缩：</p>
+      <ul>
+        <li><code>session_memory</code> &mdash; 会导致死锁（分叉子代理）</li>
+        <li><code>compact</code> &mdash; 会导致死锁（分叉子代理）</li>
+        <li><code>marble_origami</code> &mdash; 上下文折叠代理，存在模块级状态冲突</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>熔断器</h3>
+      <ul>
+        <li>连续 3 次自动压缩失败后，停止重试</li>
+        <li>防止上下文不可恢复地超限时反复调用 API</li>
+        <li>成功时重置计数</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>API 不变量保护</h3>
+      <ul>
+        <li><code>tool_use</code> / <code>tool_result</code> 配对永远不会被拆分</li>
+        <li>共享同一 <code>message.id</code> 的思考块始终一起保留</li>
+        <li>从 <code>messagesToKeep</code> 中过滤旧的压缩边界标记，防止二次裁剪</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>互斥控制</h3>
+      <ul>
+        <li>会话记忆提取使用 <code>sequential()</code> 串行化包装</li>
+        <li>如果主代理本轮已写入记忆，则跳过后台提取</li>
+        <li>重叠时：暂存上下文，仅执行一次尾随提取</li>
+        <li>上下文折叠和响应式压缩模式下禁用主动自动压缩</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 第9节：配置参考 -->
+<section id="config">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(251,191,36,0.15);">&#9881;</div>
+    <h2>9. 配置参考</h2>
+  </div>
+  <div class="card">
+    <h3>环境变量</h3>
+    <table>
+      <tr><th>变量名</th><th>作用</th></tr>
+      <tr><td><code>DISABLE_COMPACT</code></td><td>禁用所有压缩（自动 + 手动）</td></tr>
+      <tr><td><code>DISABLE_AUTO_COMPACT</code></td><td>仅禁用自动压缩（手动 <code>/compact</code> 仍可用）</td></tr>
+      <tr><td><code>CLAUDE_AUTOCOMPACT_PCT_OVERRIDE</code></td><td>以百分比覆盖自动压缩阈值（0-100）</td></tr>
+      <tr><td><code>CLAUDE_CODE_AUTO_COMPACT_WINDOW</code></td><td>覆盖有效上下文窗口大小</td></tr>
+      <tr><td><code>CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE</code></td><td>覆盖阻塞限制阈值</td></tr>
+      <tr><td><code>ENABLE_CLAUDE_CODE_SM_COMPACT</code></td><td>强制启用会话记忆压缩</td></tr>
+      <tr><td><code>DISABLE_CLAUDE_CODE_SM_COMPACT</code></td><td>强制禁用会话记忆压缩</td></tr>
+      <tr><td><code>CLAUDE_CODE_DISABLE_AUTO_MEMORY</code></td><td>禁用持久记忆提取</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>特性开关（GrowthBook）</h3>
+    <table>
+      <tr><th>开关名称</th><th>控制范围</th></tr>
+      <tr><td><code>tengu_session_memory</code></td><td>会话记忆提取开关</td></tr>
+      <tr><td><code>tengu_sm_compact</code></td><td>会话记忆压缩开关</td></tr>
+      <tr><td><code>tengu_sm_config</code></td><td>会话记忆阈值（动态配置）</td></tr>
+      <tr><td><code>tengu_sm_compact_config</code></td><td>会话记忆压缩阈值（动态配置）</td></tr>
+      <tr><td><code>tengu_passport_quail</code></td><td>持久记忆提取开关</td></tr>
+      <tr><td><code>tengu_bramble_lintel</code></td><td>提取轮次频率（默认 1 = 每轮都执行）</td></tr>
+      <tr><td><code>tengu_cobalt_raccoon</code></td><td>响应式压缩模式（抑制主动自动压缩）</td></tr>
+      <tr><td><code>tengu_moth_copse</code></td><td>提取时跳过 MEMORY.md 索引</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>关键源码文件</h3>
+    <table>
+      <tr><th>文件路径</th><th>职责</th></tr>
+      <tr><td><code>src/utils/tokens.ts</code></td><td>Token 计数与上下文估算</td></tr>
+      <tr><td><code>src/utils/context.ts</code></td><td>上下文窗口配置</td></tr>
+      <tr><td><code>src/services/compact/autoCompact.ts</code></td><td>自动压缩编排与阈值管理</td></tr>
+      <tr><td><code>src/services/compact/compact.ts</code></td><td>传统压缩算法</td></tr>
+      <tr><td><code>src/services/compact/sessionMemoryCompact.ts</code></td><td>会话记忆压缩</td></tr>
+      <tr><td><code>src/services/compact/microCompact.ts</code></td><td>工具结果微压缩</td></tr>
+      <tr><td><code>src/services/SessionMemory/sessionMemory.ts</code></td><td>会话记忆提取</td></tr>
+      <tr><td><code>src/services/SessionMemory/sessionMemoryUtils.ts</code></td><td>会话记忆状态跟踪</td></tr>
+      <tr><td><code>src/services/extractMemories/extractMemories.ts</code></td><td>持久记忆提取</td></tr>
+      <tr><td><code>src/memdir/memdir.ts</code></td><td>MEMORY.md 索引管理</td></tr>
+      <tr><td><code>src/memdir/paths.ts</code></td><td>持久记忆目录解析</td></tr>
+    </table>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  Claude Code 内存管理系统架构 &mdash; 源码分析 &mdash; 2026-04-08
+</footer>
+
+</body>
+</html>

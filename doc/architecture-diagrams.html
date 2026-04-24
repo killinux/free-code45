@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code 系统架构图</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d2e;
+    --border: #2a2d3e;
+    --text: #e0e0e0;
+    --text-dim: #8b8fa3;
+    --accent: #6c8aff;
+    --accent2: #a78bfa;
+    --accent3: #34d399;
+    --accent4: #fbbf24;
+    --accent5: #f472b6;
+    --danger: #ef4444;
+    --code-bg: #141620;
+    --node-bg: #1e2235;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+  }
+  .hero {
+    background: linear-gradient(135deg, #0a1628 0%, #0f1117 40%, #1a1040 100%);
+    padding: 72px 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: -50%;
+    width: 200%; height: 200%;
+    background: radial-gradient(circle at 50% 30%, rgba(108,138,255,0.06) 0%, transparent 50%),
+                radial-gradient(circle at 20% 70%, rgba(52,211,153,0.05) 0%, transparent 50%),
+                radial-gradient(circle at 80% 60%, rgba(167,139,250,0.05) 0%, transparent 50%);
+    animation: drift 25s ease-in-out infinite;
+  }
+  @keyframes drift { 0%,100%{transform:translate(0)} 50%{transform:translate(-1%,1%)} }
+  .hero h1 {
+    font-size: 2.6em; font-weight: 700; position: relative; margin-bottom: 14px;
+    background: linear-gradient(135deg, #6c8aff, #34d399, #a78bfa);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .hero p { color: var(--text-dim); font-size: 1.1em; position: relative; max-width: 640px; margin: 0 auto; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 40px 24px; }
+  section { margin-bottom: 64px; }
+  .section-header {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 28px; padding-bottom: 14px; border-bottom: 1px solid var(--border);
+  }
+  .section-icon {
+    width: 42px; height: 42px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.4em; flex-shrink: 0;
+  }
+  .section-header h2 { font-size: 1.5em; font-weight: 600; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 24px; margin-bottom: 16px;
+  }
+  .card h3 { font-size: 1.1em; font-weight: 600; margin-bottom: 12px; color: var(--accent2); }
+  .card h4 { font-size: 0.95em; font-weight: 600; margin: 16px 0 8px; color: var(--accent3); }
+  .card p, .card li { color: var(--text-dim); font-size: 0.93em; line-height: 1.8; }
+  .card ul, .card ol { padding-left: 20px; margin: 8px 0; }
+  .card li { margin-bottom: 4px; }
+  code {
+    background: var(--code-bg); padding: 2px 7px; border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.88em; color: var(--accent3);
+  }
+  .tag {
+    display: inline-block; padding: 2px 10px; border-radius: 20px;
+    font-size: 0.75em; font-weight: 600; margin: 0 4px 4px 0;
+  }
+  .tag-blue { background: rgba(108,138,255,0.15); color: var(--accent); }
+  .tag-purple { background: rgba(167,139,250,0.15); color: var(--accent2); }
+  .tag-green { background: rgba(52,211,153,0.15); color: var(--accent3); }
+  .tag-yellow { background: rgba(251,191,36,0.15); color: var(--accent4); }
+  .tag-pink { background: rgba(244,114,182,0.15); color: var(--accent5); }
+  .tag-red { background: rgba(239,68,68,0.15); color: var(--danger); }
+
+  /* ====== Diagram Styles ====== */
+  .diagram-wrap {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+  .diagram-title {
+    text-align: center;
+    color: var(--accent);
+    font-size: 0.85em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 24px;
+  }
+
+  /* Node */
+  .node {
+    background: var(--node-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    text-align: center;
+    font-size: 0.88em;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    position: relative;
+  }
+  .node:hover { border-color: var(--accent); box-shadow: 0 0 16px rgba(108,138,255,0.15); }
+  .node-label { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .node-sub { font-size: 0.82em; color: var(--text-dim); }
+  .node-accent { border-color: var(--accent); }
+  .node-green { border-color: var(--accent3); }
+  .node-purple { border-color: var(--accent2); }
+  .node-yellow { border-color: var(--accent4); }
+  .node-pink { border-color: var(--accent5); }
+
+  /* Tier layout */
+  .tier {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 8px 0;
+  }
+  .tier .node { min-width: 140px; flex: 0 1 auto; }
+  .tier-label {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    color: var(--text-dim);
+    font-size: 0.72em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    padding: 8px 4px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+  }
+  .tier-row {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    margin: 8px 0;
+  }
+  .tier-content { flex: 1; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; }
+
+  /* Arrow */
+  .arrow-down {
+    text-align: center; color: var(--accent); font-size: 1.8em;
+    margin: 4px 0; opacity: 0.5; line-height: 1;
+  }
+  .arrow-down.wide { display: flex; justify-content: center; gap: 60px; }
+
+  /* Grid */
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+
+  /* Compact list */
+  .file-list { font-family: 'JetBrains Mono', monospace; font-size: 0.82em; color: var(--text-dim); line-height: 1.6; }
+  .file-list .dir { color: var(--accent); font-weight: 600; }
+
+  /* Stats */
+  .stat-row { display: flex; gap: 24px; flex-wrap: wrap; margin: 16px 0; }
+  .stat { text-align: center; }
+  .stat-value { font-size: 2em; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 0.82em; color: var(--text-dim); }
+
+  /* Flow arrow horizontal */
+  .hflow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; margin: 12px 0; }
+  .hflow .node { min-width: 110px; }
+  .harrow { color: var(--accent); font-size: 1.4em; opacity: 0.5; flex-shrink: 0; }
+
+  footer {
+    text-align: center; padding: 40px; color: var(--text-dim);
+    font-size: 0.85em; border-top: 1px solid var(--border); margin-top: 40px;
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Claude Code 系统架构图</h1>
+  <p>基于源码分析的完整系统架构可视化 &mdash; 涵盖入口、查询引擎、服务层、工具链和渲染管线</p>
+</div>
+
+<div class="container">
+
+<!-- ===== 图1: 总体分层架构 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(108,138,255,0.15);">&#9881;</div>
+    <h2>图 1：总体分层架构</h2>
+  </div>
+  <div class="diagram-wrap">
+    <div class="diagram-title">Claude Code 分层架构总览</div>
+
+    <!-- 入口层 -->
+    <div class="tier-row">
+      <div class="tier-label" style="color:var(--accent3);">入口层</div>
+      <div class="tier-content">
+        <div class="node node-green">
+          <div class="node-label">cli.tsx</div>
+          <div class="node-sub">CLI 启动入口</div>
+        </div>
+        <div class="node node-green">
+          <div class="node-label">sdk/</div>
+          <div class="node-sub">Agent SDK 入口</div>
+        </div>
+        <div class="node node-green">
+          <div class="node-label">mcp.ts</div>
+          <div class="node-sub">MCP Server 入口</div>
+        </div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+
+    <!-- UI 层 -->
+    <div class="tier-row">
+      <div class="tier-label" style="color:var(--accent5);">UI 层</div>
+      <div class="tier-content">
+        <div class="node node-pink">
+          <div class="node-label">REPL.tsx</div>
+          <div class="node-sub">主交互界面（896KB）</div>
+        </div>
+        <div class="node node-pink">
+          <div class="node-label">Ink 渲染引擎</div>
+          <div class="node-sub">终端 React 渲染（~40 文件）</div>
+        </div>
+        <div class="node node-pink">
+          <div class="node-label">Components/</div>
+          <div class="node-sub">UI 组件库</div>
+        </div>
+        <div class="node node-pink">
+          <div class="node-label">Hooks/</div>
+          <div class="node-sub">100+ React 钩子</div>
+        </div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+
+    <!-- 核心层 -->
+    <div class="tier-row">
+      <div class="tier-label" style="color:var(--accent);">核心层</div>
+      <div class="tier-content">
+        <div class="node node-accent" style="min-width:200px;">
+          <div class="node-label">QueryEngine.ts</div>
+          <div class="node-sub">查询引擎（150KB+ 核心编排器）</div>
+        </div>
+        <div class="node node-accent">
+          <div class="node-label">query.ts</div>
+          <div class="node-sub">API 循环 + 上下文管理</div>
+        </div>
+        <div class="node node-accent">
+          <div class="node-label">AppStateStore</div>
+          <div class="node-sub">Zustand 全局状态</div>
+        </div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+
+    <!-- 能力层 -->
+    <div class="tier-row">
+      <div class="tier-label" style="color:var(--accent2);">能力层</div>
+      <div class="tier-content">
+        <div class="node node-purple">
+          <div class="node-label">Tools/</div>
+          <div class="node-sub">47 个工具实现</div>
+        </div>
+        <div class="node node-purple">
+          <div class="node-label">Commands/</div>
+          <div class="node-sub">89 个斜杠命令</div>
+        </div>
+        <div class="node node-purple">
+          <div class="node-label">Skills/</div>
+          <div class="node-sub">可扩展技能系统</div>
+        </div>
+        <div class="node node-purple">
+          <div class="node-label">Plugins/</div>
+          <div class="node-sub">插件系统</div>
+        </div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+
+    <!-- 服务层 -->
+    <div class="tier-row">
+      <div class="tier-label" style="color:var(--accent4);">服务层</div>
+      <div class="tier-content">
+        <div class="node node-yellow">
+          <div class="node-label">api/</div>
+          <div class="node-sub">Claude API 客户端</div>
+        </div>
+        <div class="node node-yellow">
+          <div class="node-label">compact/</div>
+          <div class="node-sub">上下文压缩</div>
+        </div>
+        <div class="node node-yellow">
+          <div class="node-label">mcp/</div>
+          <div class="node-sub">MCP 协议</div>
+        </div>
+        <div class="node node-yellow">
+          <div class="node-label">oauth/</div>
+          <div class="node-sub">认证服务</div>
+        </div>
+        <div class="node node-yellow">
+          <div class="node-label">analytics/</div>
+          <div class="node-sub">分析遥测</div>
+        </div>
+        <div class="node node-yellow">
+          <div class="node-label">SessionMemory/</div>
+          <div class="node-sub">会话记忆</div>
+        </div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+
+    <!-- 基础层 -->
+    <div class="tier-row">
+      <div class="tier-label" style="color:var(--text-dim);">基础层</div>
+      <div class="tier-content">
+        <div class="node">
+          <div class="node-label">utils/</div>
+          <div class="node-sub">292 个工具模块</div>
+        </div>
+        <div class="node">
+          <div class="node-label">constants/</div>
+          <div class="node-sub">22 个常量文件</div>
+        </div>
+        <div class="node">
+          <div class="node-label">types/</div>
+          <div class="node-sub">类型定义</div>
+        </div>
+        <div class="node">
+          <div class="node-label">bootstrap/</div>
+          <div class="node-sub">全局初始化状态</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stat-row" style="justify-content:center;">
+    <div class="stat"><div class="stat-value">47</div><div class="stat-label">工具</div></div>
+    <div class="stat"><div class="stat-value">89</div><div class="stat-label">命令</div></div>
+    <div class="stat"><div class="stat-value">100+</div><div class="stat-label">React 钩子</div></div>
+    <div class="stat"><div class="stat-value">292</div><div class="stat-label">工具模块</div></div>
+    <div class="stat"><div class="stat-value">23+</div><div class="stat-label">服务类别</div></div>
+  </div>
+</section>
+
+<!-- ===== 图2: 查询引擎核心流程 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(108,138,255,0.15);">&#9998;</div>
+    <h2>图 2：查询引擎核心流程</h2>
+  </div>
+  <div class="diagram-wrap">
+    <div class="diagram-title">QueryEngine + query.ts 交互循环</div>
+
+    <div class="tier">
+      <div class="node node-green" style="min-width:300px;">
+        <div class="node-label">用户输入</div>
+        <div class="node-sub">processUserInput() &rarr; 创建 UserMessage + 附件</div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+
+    <div class="tier">
+      <div class="node node-accent" style="min-width:400px;">
+        <div class="node-label">QueryEngine.ts &mdash; 核心编排器</div>
+        <div class="node-sub">管理对话流、工具调用、模型选择、权限系统、成本追踪</div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+
+    <div class="tier">
+      <div class="node node-accent" style="min-width:500px;">
+        <div class="node-label">query.ts &mdash; API 循环（上下文管理管线）</div>
+        <div class="node-sub">预算控制 &rarr; 裁剪 &rarr; 微压缩 &rarr; 折叠 &rarr; 自动压缩 &rarr; 组装 &rarr; 调用 API</div>
+      </div>
+    </div>
+    <div class="arrow-down wide"><span>&darr;</span><span>&darr;</span><span>&darr;</span></div>
+
+    <div class="tier">
+      <div class="node node-yellow">
+        <div class="node-label">Claude API</div>
+        <div class="node-sub">流式响应</div>
+      </div>
+      <div class="node node-purple">
+        <div class="node-label">工具执行</div>
+        <div class="node-sub">StreamingToolExecutor</div>
+      </div>
+      <div class="node node-pink">
+        <div class="node-label">错误恢复</div>
+        <div class="node-sub">重试/压缩/降级</div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+
+    <div class="tier">
+      <div class="node" style="min-width:300px; border-color:var(--accent3);">
+        <div class="node-label">响应输出 + 后处理</div>
+        <div class="node-sub">采样后钩子 &bull; 会话记忆提取 &bull; 持久记忆提取 &bull; 归因追踪</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 图3: 上下文管理管线 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(52,211,153,0.15);">&#9670;</div>
+    <h2>图 3：上下文管理管线</h2>
+  </div>
+  <div class="diagram-wrap">
+    <div class="diagram-title">query.ts 中的 8 阶段上下文处理管线（从轻到重）</div>
+
+    <div class="hflow">
+      <div class="node node-green" style="min-width:100px;">
+        <div class="node-label">原始消息</div>
+        <div class="node-sub">REPL 消息列表</div>
+      </div>
+      <div class="harrow">&rarr;</div>
+      <div class="node" style="min-width:100px;">
+        <div class="node-label">边界提取</div>
+        <div class="node-sub">压缩点之后</div>
+      </div>
+      <div class="harrow">&rarr;</div>
+      <div class="node" style="min-width:100px;">
+        <div class="node-label">预算截断</div>
+        <div class="node-sub">工具结果限制</div>
+      </div>
+      <div class="harrow">&rarr;</div>
+      <div class="node node-yellow" style="min-width:100px;">
+        <div class="node-label">Snip 裁剪</div>
+        <div class="node-sub">删除旧轮次</div>
+      </div>
+    </div>
+
+    <div class="arrow-down">&darr;</div>
+
+    <div class="hflow">
+      <div class="node node-yellow" style="min-width:100px;">
+        <div class="node-label">微压缩</div>
+        <div class="node-sub">清理工具结果</div>
+      </div>
+      <div class="harrow">&rarr;</div>
+      <div class="node node-purple" style="min-width:100px;">
+        <div class="node-label">上下文折叠</div>
+        <div class="node-sub">摘要化旧轮次</div>
+      </div>
+      <div class="harrow">&rarr;</div>
+      <div class="node node-accent" style="min-width:100px;">
+        <div class="node-label">自动压缩</div>
+        <div class="node-sub">SM/传统压缩</div>
+      </div>
+      <div class="harrow">&rarr;</div>
+      <div class="node node-green" style="min-width:130px;">
+        <div class="node-label">组装 API 请求</div>
+        <div class="node-sub">规范化+拼接</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>各阶段开销对比</h3>
+    <table>
+      <tr><th>阶段</th><th>开销</th><th>触发条件</th><th>源文件</th></tr>
+      <tr><td>边界提取</td><td><span class="tag tag-green">零</span></td><td>每次</td><td><code>messages.ts</code></td></tr>
+      <tr><td>预算截断</td><td><span class="tag tag-green">零</span></td><td>每次</td><td><code>toolResultStorage.ts</code></td></tr>
+      <tr><td>Snip 裁剪</td><td><span class="tag tag-green">零</span></td><td>HISTORY_SNIP 特性开关</td><td><code>snip 模块</code></td></tr>
+      <tr><td>微压缩</td><td><span class="tag tag-yellow">零/低</span></td><td>时间间隔 / 工具数量</td><td><code>microCompact.ts</code></td></tr>
+      <tr><td>上下文折叠</td><td><span class="tag tag-yellow">中</span></td><td>CONTEXT_COLLAPSE 特性开关</td><td><code>contextCollapse/</code></td></tr>
+      <tr><td>自动压缩</td><td><span class="tag tag-red">高</span></td><td>Token > ~93%</td><td><code>autoCompact.ts</code></td></tr>
+      <tr><td>规范化</td><td><span class="tag tag-green">零</span></td><td>每次</td><td><code>messages.ts</code></td></tr>
+      <tr><td>拼接</td><td><span class="tag tag-green">零</span></td><td>每次</td><td><code>api.ts</code></td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ===== 图4: 内存与记忆系统 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(167,139,250,0.15);">&#9733;</div>
+    <h2>图 4：内存与记忆系统</h2>
+  </div>
+  <div class="diagram-wrap">
+    <div class="diagram-title">多层记忆体系 &mdash; 从实时到永久</div>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;">
+      <div class="node node-yellow" style="min-width:160px;">
+        <div class="node-label">微压缩</div>
+        <div class="node-sub">清理工具结果<br><span class="tag tag-yellow">实时</span></div>
+      </div>
+      <div class="node node-accent" style="min-width:160px;">
+        <div class="node-label">自动压缩</div>
+        <div class="node-sub">对话摘要化<br><span class="tag tag-blue">会话内</span></div>
+      </div>
+      <div class="node node-purple" style="min-width:160px;">
+        <div class="node-label">Session Memory</div>
+        <div class="node-sub">结构化会话笔记<br><span class="tag tag-purple">会话文件</span></div>
+      </div>
+      <div class="node node-pink" style="min-width:160px;">
+        <div class="node-label">Auto Memory</div>
+        <div class="node-sub">持久化知识<br><span class="tag tag-pink">永久文件</span></div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;">
+      <div class="node" style="min-width:200px;">
+        <div class="node-label">会话记忆压缩 (SM Compact)</div>
+        <div class="node-sub">零 API 开销，使用 Session Memory 作为摘要</div>
+      </div>
+      <div class="node" style="min-width:200px;">
+        <div class="node-label">传统压缩 (Legacy Compact)</div>
+        <div class="node-sub">1 次 API 调用，LLM 生成 9 章节摘要</div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+    <div class="tier">
+      <div class="node node-green" style="min-width:300px;">
+        <div class="node-label">存储位置</div>
+        <div class="node-sub">
+          Session Memory: <code>~/.claude/session-memory/</code><br>
+          Auto Memory: <code>~/.claude/projects/&lt;path&gt;/memory/</code><br>
+          Team Memory: <code>CLAUDEAPI_TEAM_MEMORY_DIR</code>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 图5: 服务层详细架构 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(251,191,36,0.15);">&#9881;</div>
+    <h2>图 5：服务层详细架构</h2>
+  </div>
+  <div class="grid-3">
+    <div class="card">
+      <h3>API 服务</h3>
+      <span class="tag tag-yellow">services/api/</span>
+      <ul>
+        <li><code>claude.ts</code> &mdash; API 客户端</li>
+        <li><code>errors.ts</code> &mdash; 错误处理</li>
+        <li><code>withRetry.ts</code> &mdash; 重试逻辑</li>
+        <li><code>promptCacheBreakDetection.ts</code></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>压缩服务</h3>
+      <span class="tag tag-blue">services/compact/</span>
+      <ul>
+        <li><code>autoCompact.ts</code> &mdash; 自动压缩</li>
+        <li><code>compact.ts</code> &mdash; 传统压缩</li>
+        <li><code>microCompact.ts</code> &mdash; 微压缩</li>
+        <li><code>sessionMemoryCompact.ts</code></li>
+        <li><code>grouping.ts</code> &mdash; 轮次分组</li>
+        <li><code>prompt.ts</code> &mdash; 压缩提示词</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>记忆服务</h3>
+      <span class="tag tag-purple">services/SessionMemory/</span><br>
+      <span class="tag tag-pink">services/extractMemories/</span>
+      <ul>
+        <li><code>sessionMemory.ts</code> &mdash; 会话记忆</li>
+        <li><code>extractMemories.ts</code> &mdash; 持久记忆</li>
+        <li><code>autoDream/</code> &mdash; 记忆合并</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>认证服务</h3>
+      <span class="tag tag-green">services/oauth/</span>
+      <ul>
+        <li>OAuth 认证流程</li>
+        <li>API Key 管理</li>
+        <li>Codex 登录</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>MCP 服务</h3>
+      <span class="tag tag-blue">services/mcp/</span>
+      <ul>
+        <li>MCP 服务器管理</li>
+        <li>工具/资源发现</li>
+        <li>传输层抽象</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>分析与遥测</h3>
+      <span class="tag tag-yellow">services/analytics/</span>
+      <ul>
+        <li><code>growthbook.ts</code> &mdash; 特性开关</li>
+        <li>事件日志</li>
+        <li>Datadog 集成</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>上下文折叠</h3>
+      <span class="tag tag-purple">services/contextCollapse/</span>
+      <ul>
+        <li>细粒度上下文管理</li>
+        <li>已提交日志维护</li>
+        <li>投射视图生成</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>其他服务</h3>
+      <ul>
+        <li><code>PromptSuggestion/</code> &mdash; 提示建议</li>
+        <li><code>AgentSummary/</code> &mdash; 代理摘要</li>
+        <li><code>plugins/</code> &mdash; 插件管理</li>
+        <li><code>policyLimits/</code> &mdash; 策略限制</li>
+        <li><code>teamMemorySync/</code> &mdash; 团队记忆同步</li>
+        <li><code>tips/</code> &mdash; 提示系统</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>语音服务</h3>
+      <span class="tag tag-pink">services/voice*</span>
+      <ul>
+        <li><code>voice.ts</code> &mdash; 语音输入输出</li>
+        <li><code>voiceStreamSTT/</code> &mdash; 流式语音转文字</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 图6: 工具生态系统 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(167,139,250,0.15);">&#9998;</div>
+    <h2>图 6：工具生态系统（47 个工具）</h2>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>文件操作</h3>
+      <div class="grid-4">
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">FileRead</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">FileEdit</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">FileWrite</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">NotebookEdit</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>搜索工具</h3>
+      <div class="grid-4">
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">Glob</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">Grep</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">ToolSearch</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">WebSearch</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Shell 执行</h3>
+      <div class="grid-4">
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">Bash</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">PowerShell</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">LSP</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">WebFetch</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>任务管理</h3>
+      <div class="grid-4">
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">TaskCreate</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">TaskGet</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">TaskList</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">TaskUpdate</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>代理与交互</h3>
+      <div class="grid-4">
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">Agent</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">Skill</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">AskUser</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">SendMessage</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>模式控制与调度</h3>
+      <div class="grid-4">
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">PlanMode</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">Worktree</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">ScheduleCron</div></div>
+        <div class="node" style="padding:8px;"><div class="node-label" style="font-size:0.82em;">MCP</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 图7: Prompt 缓存架构 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(52,211,153,0.15);">&#9729;</div>
+    <h2>图 7：Prompt 缓存架构</h2>
+  </div>
+  <div class="diagram-wrap">
+    <div class="diagram-title">API 请求的缓存分层</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;">
+      <div class="node node-green" style="min-width:220px;">
+        <div class="node-label">系统提示词（静态前缀）</div>
+        <div class="node-sub">cache_control: ephemeral + TTL + scope<br>跨请求缓存命中</div>
+      </div>
+      <div class="node" style="min-width:220px;">
+        <div class="node-label">系统提示词（动态后缀）</div>
+        <div class="node-sub">无缓存控制<br>每次请求可能不同</div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;">
+      <div class="node node-accent" style="min-width:180px;">
+        <div class="node-label">工具定义</div>
+        <div class="node-sub">JSON Schema<br>带 cache_control</div>
+      </div>
+      <div class="node node-purple" style="min-width:180px;">
+        <div class="node-label">用户上下文</div>
+        <div class="node-sub">CLAUDE.md + 记忆<br>首条用户消息</div>
+      </div>
+      <div class="node node-yellow" style="min-width:180px;">
+        <div class="node-label">消息历史</div>
+        <div class="node-sub">规范化后的对话<br>增量部分无缓存</div>
+      </div>
+    </div>
+    <div class="arrow-down">&darr;</div>
+    <div class="tier">
+      <div class="node node-pink" style="min-width:300px;">
+        <div class="node-label">缓存中断检测</div>
+        <div class="node-sub">recordPromptState() &rarr; API 调用 &rarr; checkResponseForCacheBreak()<br>跟踪 15+ 状态参数，检测缓存命中率异常</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 图8: 权限系统 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(239,68,68,0.15);">&#9888;</div>
+    <h2>图 8：权限系统架构</h2>
+  </div>
+  <div class="diagram-wrap">
+    <div class="diagram-title">工具调用权限决策流程</div>
+    <div class="hflow">
+      <div class="node node-accent" style="min-width:120px;">
+        <div class="node-label">工具调用请求</div>
+      </div>
+      <div class="harrow">&rarr;</div>
+      <div class="node node-yellow" style="min-width:140px;">
+        <div class="node-label">权限规则检查</div>
+        <div class="node-sub">filesystem.ts<br>permissions.ts</div>
+      </div>
+      <div class="harrow">&rarr;</div>
+      <div class="node node-purple" style="min-width:140px;">
+        <div class="node-label">YOLO 分类器</div>
+        <div class="node-sub">yoloClassifier.ts<br>自动判定安全性</div>
+      </div>
+      <div class="harrow">&rarr;</div>
+      <div class="node node-green" style="min-width:100px;">
+        <div class="node-label">允许</div>
+      </div>
+    </div>
+    <div style="text-align:center;margin:8px 0;">
+      <span style="color:var(--text-dim);font-size:0.85em;">&darr; 如果分类器不确定</span>
+    </div>
+    <div class="hflow">
+      <div class="node node-pink" style="min-width:160px;">
+        <div class="node-label">交互式权限对话框</div>
+        <div class="node-sub">12+ 种权限组件<br>Bash/FileEdit/MCP 等</div>
+      </div>
+      <div class="harrow">&rarr;</div>
+      <div class="node" style="min-width:100px;">
+        <div class="node-label">用户决定</div>
+        <div class="node-sub">允许/拒绝/始终允许</div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>权限子系统文件</h3>
+    <p><span class="file-ref">src/utils/permissions/</span> &mdash; 25 个文件</p>
+    <ul>
+      <li><code>permissions.ts</code> (52KB) &mdash; 主权限逻辑</li>
+      <li><code>yoloClassifier.ts</code> (52KB) &mdash; 自动化权限判定</li>
+      <li><code>filesystem.ts</code> (62KB) &mdash; 文件系统权限规则</li>
+      <li>权限模式、规则验证、信任链管理</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 图9: 扩展系统 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(244,114,182,0.15);">&#9733;</div>
+    <h2>图 9：扩展系统</h2>
+  </div>
+  <div class="diagram-wrap">
+    <div class="diagram-title">四种扩展机制</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;">
+      <div class="node node-purple" style="min-width:200px;">
+        <div class="node-label">MCP 服务器</div>
+        <div class="node-sub">Model Context Protocol<br>外部工具/资源提供者<br>支持 stdio/sse/streamable-http 传输</div>
+      </div>
+      <div class="node node-accent" style="min-width:200px;">
+        <div class="node-label">插件系统</div>
+        <div class="node-sub">builtinPlugins.ts<br>热重载支持<br>可注入工具和命令</div>
+      </div>
+      <div class="node node-green" style="min-width:200px;">
+        <div class="node-label">技能系统</div>
+        <div class="node-sub">bundledSkills.ts<br>可加载外部技能目录<br>斜杠命令式扩展</div>
+      </div>
+      <div class="node node-yellow" style="min-width:200px;">
+        <div class="node-label">用户钩子</div>
+        <div class="node-sub">settings.json hooks<br>工具调用前后触发<br>Shell 命令执行</div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>合并机制</h3>
+    <p>多个扩展源的工具和命令通过以下钩子合并到主系统：</p>
+    <ul>
+      <li><code>useMergedTools.ts</code> &mdash; 合并内置工具 + MCP 工具 + 插件工具</li>
+      <li><code>useMergedCommands.ts</code> &mdash; 合并内置命令 + 插件命令</li>
+      <li><code>useMergedClients.ts</code> &mdash; 合并 MCP 客户端</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 图10: 多代理与任务系统 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(108,138,255,0.15);">&#9998;</div>
+    <h2>图 10：多代理与任务系统</h2>
+  </div>
+  <div class="diagram-wrap">
+    <div class="diagram-title">任务类型与代理模式</div>
+    <div class="tier">
+      <div class="node node-accent" style="min-width:200px;">
+        <div class="node-label">主会话任务</div>
+        <div class="node-sub">LocalMainSessionTask<br>主线程执行</div>
+      </div>
+    </div>
+    <div class="arrow-down wide"><span>&darr;</span><span>&darr;</span><span>&darr;</span></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">
+      <div class="node node-purple" style="min-width:150px;">
+        <div class="node-label">Agent 任务</div>
+        <div class="node-sub">LocalAgentTask<br>子代理执行</div>
+      </div>
+      <div class="node node-yellow" style="min-width:150px;">
+        <div class="node-label">Shell 任务</div>
+        <div class="node-sub">LocalShellTask<br>后台 Shell</div>
+      </div>
+      <div class="node node-pink" style="min-width:150px;">
+        <div class="node-label">远程代理</div>
+        <div class="node-sub">RemoteAgentTask<br>远程执行</div>
+      </div>
+      <div class="node node-green" style="min-width:150px;">
+        <div class="node-label">进程内队友</div>
+        <div class="node-sub">InProcessTeammateTask<br>协作代理</div>
+      </div>
+      <div class="node" style="min-width:150px;">
+        <div class="node-label">Dream 任务</div>
+        <div class="node-sub">DreamTask<br>记忆合并</div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>分叉子代理模式</h3>
+    <p><span class="file-ref">src/utils/forkedAgent.ts</span></p>
+    <p>系统中多个后台操作使用 <code>runForkedAgent()</code> 创建隔离的子代理，共享父级的 Prompt 缓存以降低成本：</p>
+    <ul>
+      <li><strong>会话记忆提取</strong> &mdash; <code>querySource: 'session_memory'</code></li>
+      <li><strong>持久记忆提取</strong> &mdash; <code>querySource: 'extract_memories'</code></li>
+      <li><strong>传统压缩</strong> &mdash; <code>querySource: 'compact'</code></li>
+      <li><strong>代理摘要</strong> &mdash; <code>querySource: 'agent_summary'</code></li>
+      <li><strong>提示建议</strong> &mdash; <code>querySource: 'prompt_suggestion'</code></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 图11: IDE Bridge 架构 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(52,211,153,0.15);">&#9881;</div>
+    <h2>图 11：IDE Bridge 架构</h2>
+  </div>
+  <div class="diagram-wrap">
+    <div class="diagram-title">CLI ↔ IDE 双向通信</div>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;justify-content:center;align-items:center;">
+      <div class="node node-green" style="min-width:160px;">
+        <div class="node-label">VS Code 扩展</div>
+        <div class="node-sub">JetBrains 扩展</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+        <span style="color:var(--accent);font-size:0.85em;">&larr; WebSocket &rarr;</span>
+        <span style="color:var(--text-dim);font-size:0.75em;">bridgeMessaging.ts</span>
+      </div>
+      <div class="node node-accent" style="min-width:180px;">
+        <div class="node-label">Bridge 核心</div>
+        <div class="node-sub">bridgeMain.ts (115KB)<br>replBridge.ts (100KB)</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+        <span style="color:var(--accent);font-size:0.85em;">&larr; &rarr;</span>
+      </div>
+      <div class="node node-purple" style="min-width:160px;">
+        <div class="node-label">REPL 会话</div>
+        <div class="node-sub">文件同步、选区、<br>权限代理</div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/bridge/</span> &mdash; 30+ 文件，540KB</p>
+    <p>提供 claude.ai Web 端和 CLI 之间、IDE 扩展和 CLI 之间的实时会话同步。包含 JWT 认证、设备信任、会话创建和传输层抽象。</p>
+  </div>
+</section>
+
+<!-- ===== 图12: 特性开关系统 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(251,191,36,0.15);">&#9881;</div>
+    <h2>图 12：特性开关体系</h2>
+  </div>
+  <div class="card">
+    <h3>编译时特性开关（<code>bun:bundle feature()</code>）</h3>
+    <p>通过构建脚本 <code>scripts/build.ts</code> 在编译时启用/禁用，不满足条件的代码会被死代码消除。</p>
+    <div class="grid-3" style="margin-top:12px;">
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">CACHED_MICROCOMPACT</div><div class="node-sub">缓存编辑系统</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">CONTEXT_COLLAPSE</div><div class="node-sub">上下文折叠</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">REACTIVE_COMPACT</div><div class="node-sub">响应式压缩</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">HISTORY_SNIP</div><div class="node-sub">历史裁剪</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">KAIROS</div><div class="node-sub">远程助手模式</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">COORDINATOR_MODE</div><div class="node-sub">多代理协调</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">TEAMMEM</div><div class="node-sub">团队记忆</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">PROACTIVE</div><div class="node-sub">主动模式</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">VOICE_MODE</div><div class="node-sub">语音输入</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>运行时特性开关（GrowthBook）</h3>
+    <p>通过 <code>getFeatureValue_CACHED_MAY_BE_STALE()</code> 读取缓存值，非阻塞。</p>
+    <div class="grid-3" style="margin-top:12px;">
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">tengu_session_memory</div><div class="node-sub">会话记忆开关</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">tengu_sm_compact</div><div class="node-sub">SM 压缩开关</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">tengu_passport_quail</div><div class="node-sub">持久记忆开关</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">tengu_cobalt_raccoon</div><div class="node-sub">响应式压缩模式</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">tengu_bramble_lintel</div><div class="node-sub">提取频率</div></div>
+      <div class="node" style="padding:10px;"><div class="node-label" style="font-size:0.82em;">coral_reef_sonnet</div><div class="node-sub">Sonnet 1M 实验</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 图13: 目录结构概览 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(167,139,250,0.15);">&#9776;</div>
+    <h2>图 13：源码目录结构概览</h2>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>核心目录</h3>
+      <div class="file-list">
+        <span class="dir">src/entrypoints/</span> &mdash; 启动入口<br>
+        <span class="dir">src/screens/</span> &mdash; UI 界面（REPL, Doctor）<br>
+        <span class="dir">src/query.ts</span> &mdash; API 循环主文件<br>
+        <span class="dir">src/QueryEngine.ts</span> &mdash; 查询引擎编排器<br>
+        <span class="dir">src/commands.ts</span> &mdash; 命令注册表<br>
+        <span class="dir">src/tools.ts</span> &mdash; 工具注册表<br>
+        <span class="dir">src/state/</span> &mdash; Zustand 状态管理<br>
+        <span class="dir">src/context/</span> &mdash; 9 个 React Context<br>
+        <span class="dir">src/bootstrap/</span> &mdash; 全局初始化<br>
+      </div>
+    </div>
+    <div class="card">
+      <h3>功能目录</h3>
+      <div class="file-list">
+        <span class="dir">src/commands/</span> &mdash; 89 个命令实现<br>
+        <span class="dir">src/tools/</span> &mdash; 47 个工具实现<br>
+        <span class="dir">src/services/</span> &mdash; 23+ 个服务类别<br>
+        <span class="dir">src/hooks/</span> &mdash; 100+ 个 React 钩子<br>
+        <span class="dir">src/components/</span> &mdash; UI 组件<br>
+        <span class="dir">src/skills/</span> &mdash; 技能系统<br>
+        <span class="dir">src/plugins/</span> &mdash; 插件系统<br>
+        <span class="dir">src/bridge/</span> &mdash; IDE 桥接（30+ 文件）<br>
+        <span class="dir">src/tasks/</span> &mdash; 7 种任务类型<br>
+      </div>
+    </div>
+    <div class="card">
+      <h3>基础设施</h3>
+      <div class="file-list">
+        <span class="dir">src/utils/</span> &mdash; 292 个工具模块<br>
+        &nbsp;&nbsp;<span class="dir">utils/permissions/</span> &mdash; 25 个权限文件<br>
+        &nbsp;&nbsp;<span class="dir">utils/model/</span> &mdash; 16 个模型配置<br>
+        &nbsp;&nbsp;<span class="dir">utils/settings/</span> &mdash; 13 个设置文件<br>
+        <span class="dir">src/constants/</span> &mdash; 22 个常量文件<br>
+        <span class="dir">src/types/</span> &mdash; 9 个类型文件<br>
+        <span class="dir">src/memdir/</span> &mdash; 8 个记忆管理文件<br>
+      </div>
+    </div>
+    <div class="card">
+      <h3>渲染与输出</h3>
+      <div class="file-list">
+        <span class="dir">src/ink/</span> &mdash; 终端渲染引擎（~40 文件）<br>
+        <span class="dir">src/cli/</span> &mdash; 输出格式化<br>
+        &nbsp;&nbsp;<code>print.ts</code> (212KB) 主输出格式器<br>
+        &nbsp;&nbsp;<code>structuredIO.ts</code> 结构化输出<br>
+        <span class="dir">src/voice/</span> &mdash; 语音输入<br>
+        <span class="dir">src/vim/</span> &mdash; Vim 模式支持<br>
+        <span class="dir">src/keybindings/</span> &mdash; 键绑定管理<br>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  Claude Code 系统架构图 &mdash; 源码分析 &mdash; 2026-04-08
+</footer>
+
+</body>
+</html>

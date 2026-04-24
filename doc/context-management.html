@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code 上下文管理系统深度解析</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d2e;
+    --border: #2a2d3e;
+    --text: #e0e0e0;
+    --text-dim: #8b8fa3;
+    --accent: #6c8aff;
+    --accent2: #a78bfa;
+    --accent3: #34d399;
+    --accent4: #fbbf24;
+    --accent5: #f472b6;
+    --danger: #ef4444;
+    --code-bg: #141620;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+  }
+  .hero {
+    background: linear-gradient(135deg, #0a1628 0%, #0f1117 50%, #1a1040 100%);
+    padding: 80px 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    background: radial-gradient(circle at 60% 40%, rgba(108,138,255,0.08) 0%, transparent 50%),
+                radial-gradient(circle at 30% 60%, rgba(52,211,153,0.06) 0%, transparent 50%);
+    animation: drift 20s ease-in-out infinite;
+  }
+  @keyframes drift {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(-2%, 1%); }
+  }
+  .hero h1 {
+    font-size: 2.6em;
+    font-weight: 700;
+    background: linear-gradient(135deg, #34d399, #6c8aff, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    position: relative;
+    margin-bottom: 16px;
+  }
+  .hero p { color: var(--text-dim); font-size: 1.1em; position: relative; max-width: 640px; margin: 0 auto; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 40px 24px; }
+  .toc {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    margin-bottom: 48px;
+  }
+  .toc h2 { font-size: 1.3em; margin-bottom: 16px; color: var(--accent); }
+  .toc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 8px;
+  }
+  .toc a {
+    color: var(--text-dim);
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.2s;
+    font-size: 0.95em;
+  }
+  .toc a:hover { color: var(--text); background: rgba(108,138,255,0.08); }
+  .toc .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px; height: 24px;
+    border-radius: 6px;
+    background: rgba(108,138,255,0.15);
+    color: var(--accent);
+    font-size: 0.8em;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  section { margin-bottom: 56px; }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-icon {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3em;
+    flex-shrink: 0;
+  }
+  .section-header h2 { font-size: 1.5em; font-weight: 600; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+  .card h3 { font-size: 1.1em; font-weight: 600; margin-bottom: 12px; color: var(--accent2); }
+  .card h4 { font-size: 0.95em; font-weight: 600; margin: 16px 0 8px; color: var(--accent3); }
+  .card p, .card li { color: var(--text-dim); font-size: 0.93em; line-height: 1.8; }
+  .card ul, .card ol { padding-left: 20px; margin: 8px 0; }
+  .card li { margin-bottom: 4px; }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 16px;
+  }
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9em; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  th { color: var(--accent); font-weight: 600; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { color: var(--text-dim); }
+  tr:last-child td { border-bottom: none; }
+  code {
+    background: var(--code-bg);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.88em;
+    color: var(--accent3);
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    overflow-x: auto;
+    margin: 12px 0;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85em;
+    line-height: 1.7;
+    color: var(--text-dim);
+  }
+  .tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.78em;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+  .tag-blue { background: rgba(108,138,255,0.15); color: var(--accent); }
+  .tag-purple { background: rgba(167,139,250,0.15); color: var(--accent2); }
+  .tag-green { background: rgba(52,211,153,0.15); color: var(--accent3); }
+  .tag-yellow { background: rgba(251,191,36,0.15); color: var(--accent4); }
+  .tag-pink { background: rgba(244,114,182,0.15); color: var(--accent5); }
+  .tag-red { background: rgba(239,68,68,0.15); color: var(--danger); }
+  .highlight-box {
+    border-left: 3px solid var(--accent);
+    background: rgba(108,138,255,0.05);
+    padding: 16px 20px;
+    border-radius: 0 8px 8px 0;
+    margin: 16px 0;
+  }
+  .highlight-box.warn { border-left-color: var(--accent4); background: rgba(251,191,36,0.05); }
+  .highlight-box.danger { border-left-color: var(--danger); background: rgba(239,68,68,0.05); }
+  .highlight-box.success { border-left-color: var(--accent3); background: rgba(52,211,153,0.05); }
+  .flow-diagram {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px;
+    margin: 20px 0;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8em;
+    line-height: 1.8;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .metric { display: flex; align-items: baseline; gap: 8px; margin: 8px 0; }
+  .metric-value { font-size: 1.5em; font-weight: 700; color: var(--accent); }
+  .metric-label { color: var(--text-dim); font-size: 0.88em; }
+  .file-ref { color: var(--accent3); font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85em; }
+  .step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(108,138,255,0.15); color: var(--accent);
+    font-size: 0.85em; font-weight: 700; flex-shrink: 0; margin-right: 10px;
+  }
+  .step { display: flex; align-items: flex-start; margin-bottom: 12px; }
+  .step-content { flex: 1; }
+  .pipeline-arrow {
+    text-align: center; color: var(--accent); font-size: 1.5em;
+    margin: 8px 0; opacity: 0.5;
+  }
+  footer {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-dim);
+    font-size: 0.85em;
+    border-top: 1px solid var(--border);
+    margin-top: 40px;
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Claude Code 上下文管理系统</h1>
+  <p>从上下文窗口配置到消息组装、缓存优化和压缩回收的完整生命周期解析</p>
+</div>
+
+<div class="container">
+
+<!-- 目录 -->
+<div class="toc">
+  <h2>目录</h2>
+  <div class="toc-grid">
+    <a href="#window"><span class="num">1</span> 上下文窗口配置</a>
+    <a href="#pipeline"><span class="num">2</span> 查询管线（Query Pipeline）</a>
+    <a href="#messages"><span class="num">3</span> 消息管理与规范化</a>
+    <a href="#system-prompt"><span class="num">4</span> 系统提示词构造</a>
+    <a href="#cache"><span class="num">5</span> Prompt 缓存机制</a>
+    <a href="#budget"><span class="num">6</span> 工具结果预算控制</a>
+    <a href="#snip"><span class="num">7</span> 历史裁剪（History Snip）</a>
+    <a href="#micro"><span class="num">8</span> 微压缩（Micro Compact）</a>
+    <a href="#collapse"><span class="num">9</span> 上下文折叠（Context Collapse）</a>
+    <a href="#compact"><span class="num">10</span> 完整压缩（Full Compact）</a>
+    <a href="#recovery"><span class="num">11</span> 错误恢复机制</a>
+    <a href="#analysis"><span class="num">12</span> 上下文分析工具</a>
+    <a href="#output"><span class="num">13</span> 输出 Token 管理</a>
+    <a href="#e2e"><span class="num">14</span> 端到端数据流</a>
+  </div>
+</div>
+
+<!-- 第1节：上下文窗口配置 -->
+<section id="window">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(52,211,153,0.15);">&#9670;</div>
+    <h2>1. 上下文窗口配置</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/utils/context.ts</span></p>
+    <h3>核心常量</h3>
+    <table>
+      <tr><th>常量</th><th>值</th><th>说明</th></tr>
+      <tr><td><code>MODEL_CONTEXT_WINDOW_DEFAULT</code></td><td>200,000</td><td>所有模型的默认上下文窗口</td></tr>
+      <tr><td><code>COMPACT_MAX_OUTPUT_TOKENS</code></td><td>20,000</td><td>压缩操作的最大输出 token 数</td></tr>
+      <tr><td><code>MAX_OUTPUT_TOKENS_DEFAULT</code></td><td>32,000</td><td>默认最大输出 token 数</td></tr>
+      <tr><td><code>MAX_OUTPUT_TOKENS_UPPER_LIMIT</code></td><td>64,000</td><td>输出 token 上限</td></tr>
+      <tr><td><code>CAPPED_DEFAULT_MAX_TOKENS</code></td><td>8,000</td><td>槽位预留优化上限（p99 输出仅 4,911 token）</td></tr>
+      <tr><td><code>ESCALATED_MAX_TOKENS</code></td><td>64,000</td><td>重试升级后的输出 token 数</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3><code>getContextWindowForModel()</code> &mdash; 窗口大小判定逻辑</h3>
+    <p>按以下优先级依次判定：</p>
+    <ol>
+      <li><strong>环境变量覆盖</strong>：<code>CLAUDE_CODE_MAX_CONTEXT_TOKENS</code>（仅内部用户）</li>
+      <li><strong>[1m] 后缀</strong>：模型名包含 <code>[1m]</code> &rarr; 返回 1,000,000</li>
+      <li><strong>模型能力查询</strong>：<code>getModelCapability(model).max_input_tokens</code></li>
+      <li><strong>Beta 头部</strong>：<code>CONTEXT_1M_BETA_HEADER</code> 且模型支持 1M</li>
+      <li><strong>实验分组</strong>：<code>getSonnet1mExpTreatmentEnabled()</code>（Sonnet 4.6 的 1M 实验）</li>
+      <li><strong>默认值</strong>：200,000</li>
+    </ol>
+    <div class="highlight-box">
+      <strong>1M 上下文禁用：</strong><code>CLAUDE_CODE_DISABLE_1M_CONTEXT</code> 环境变量可全局禁用 1M 上下文，用于 HIPAA 合规场景。
+    </div>
+  </div>
+  <div class="card">
+    <h3>各模型输出 Token 限制</h3>
+    <table>
+      <tr><th>模型</th><th>默认输出</th><th>上限</th></tr>
+      <tr><td>Opus 4.6</td><td>64,000</td><td>128,000</td></tr>
+      <tr><td>Sonnet 4.6</td><td>32,000</td><td>128,000</td></tr>
+      <tr><td>Opus 4.5 / Sonnet 4 / Haiku 4</td><td>32,000</td><td>64,000</td></tr>
+      <tr><td>Claude 3.7 Sonnet</td><td>32,000</td><td>64,000</td></tr>
+      <tr><td>Claude 3.5 Sonnet/Haiku</td><td>8,192</td><td>8,192</td></tr>
+      <tr><td>Claude 3 Opus</td><td>4,096</td><td>4,096</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- 第2节：查询管线 -->
+<section id="pipeline">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(108,138,255,0.15);">&#9881;</div>
+    <h2>2. 查询管线（Query Pipeline）</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/query.ts</span></p>
+    <p>这是整个上下文管理的核心编排文件。每次模型调用前，消息经过多个处理阶段：</p>
+    <div class="step">
+      <span class="step-num">1</span>
+      <div class="step-content"><strong>提取压缩边界后的消息</strong><br><code>getMessagesAfterCompactBoundary(messages)</code> &mdash; 从最近一次压缩边界标记之后开始</div>
+    </div>
+    <div class="pipeline-arrow">&darr;</div>
+    <div class="step">
+      <span class="step-num">2</span>
+      <div class="step-content"><strong>工具结果预算控制</strong><br><code>applyToolResultBudget()</code> &mdash; 对每条消息中过大的工具结果进行截断</div>
+    </div>
+    <div class="pipeline-arrow">&darr;</div>
+    <div class="step">
+      <span class="step-num">3</span>
+      <div class="step-content"><strong>历史裁剪（Snip）</strong><br><code>snipCompactIfNeeded()</code> &mdash; 移除中间轮次的旧消息，释放 token</div>
+    </div>
+    <div class="pipeline-arrow">&darr;</div>
+    <div class="step">
+      <span class="step-num">4</span>
+      <div class="step-content"><strong>微压缩</strong><br><code>microcompactMessages()</code> &mdash; 清理旧的工具结果内容（时间触发 / 缓存编辑）</div>
+    </div>
+    <div class="pipeline-arrow">&darr;</div>
+    <div class="step">
+      <span class="step-num">5</span>
+      <div class="step-content"><strong>上下文折叠</strong><br><code>applyCollapsesIfNeeded()</code> &mdash; 将已提交的折叠摘要投射到消息视图上</div>
+    </div>
+    <div class="pipeline-arrow">&darr;</div>
+    <div class="step">
+      <span class="step-num">6</span>
+      <div class="step-content"><strong>自动压缩</strong><br><code>autoCompactIfNeeded()</code> &mdash; 当 token 超过阈值（~93%）时触发完整压缩</div>
+    </div>
+    <div class="pipeline-arrow">&darr;</div>
+    <div class="step">
+      <span class="step-num">7</span>
+      <div class="step-content"><strong>阻塞限制检查</strong><br>如果 token 达到 ~98%（<code>effectiveWindow - 3K</code>），直接阻塞并提示用户</div>
+    </div>
+    <div class="pipeline-arrow">&darr;</div>
+    <div class="step">
+      <span class="step-num">8</span>
+      <div class="step-content"><strong>组装 API 请求</strong><br>
+        <code>prependUserContext()</code> 前置用户上下文<br>
+        <code>appendSystemContext()</code> 拼接系统上下文<br>
+        <code>toolToAPISchema()</code> 转换工具定义<br>
+        最终调用 <code>callModel()</code>
+      </div>
+    </div>
+  </div>
+  <div class="highlight-box success">
+    <strong>设计原则：</strong>各阶段从轻到重递进 &mdash; 先裁剪（零开销）、再微压缩（低开销）、再折叠（中开销）、最后完整压缩（高开销）。如果轻量级手段就能让 token 回落到阈值以下，则跳过重量级手段。
+  </div>
+</section>
+
+<!-- 第3节：消息管理 -->
+<section id="messages">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(167,139,250,0.15);">&#9998;</div>
+    <h2>3. 消息管理与规范化</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/utils/messages.ts</span></p>
+    <h3>消息类型</h3>
+    <table>
+      <tr><th>类型</th><th>说明</th></tr>
+      <tr><td><code>UserMessage</code></td><td>用户输入（可包含文本、工具结果、图片等内容块）</td></tr>
+      <tr><td><code>AssistantMessage</code></td><td>模型回复（包含 usage 数据、message.id 等元信息）</td></tr>
+      <tr><td><code>AttachmentMessage</code></td><td>附件（文件、任务、记忆、IDE 选区等）</td></tr>
+      <tr><td><code>SystemMessage</code></td><td>系统消息（进度提示、错误、压缩边界标记等）</td></tr>
+      <tr><td><code>HookResultMessage</code></td><td>钩子执行结果</td></tr>
+      <tr><td><code>TombstoneMessage</code></td><td>已删除消息的占位标记</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3><code>normalizeMessagesForAPI()</code> &mdash; API 规范化</h3>
+    <p>将内部 <code>Message[]</code> 转换为 API 兼容格式，是发送给模型前的最后一步处理：</p>
+    <ul>
+      <li><strong>合并同源记录</strong>：将共享同一 <code>message.id</code> 的多条 assistant 记录合并（流式输出的拆分产物）</li>
+      <li><strong>剥离 advisor 块</strong>：<code>stripAdvisorBlocks()</code> 移除顾问模型的内容</li>
+      <li><strong>剥离 caller 字段</strong>：<code>stripCallerFieldFromAssistantMessage()</code> 移除 tool_use 中的 caller 标记</li>
+      <li><strong>剥离 tool_reference 块</strong>：<code>stripToolReferenceBlocksFromUserMessage()</code></li>
+      <li><strong>确保配对完整</strong>：<code>ensureToolResultPairing()</code> 保证每个 tool_use 都有对应的 tool_result</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>压缩边界标记</h3>
+    <p><code>createCompactBoundaryMessage()</code> 创建一种特殊的系统消息，标记压缩发生的位置。查询管线通过 <code>getMessagesAfterCompactBoundary()</code> 从最近边界之后开始取消息，确保压缩后的摘要和新消息构成完整上下文。</p>
+  </div>
+  <div class="card">
+    <h3>消息分组 &mdash; API 轮次边界</h3>
+    <p><span class="file-ref">src/services/compact/grouping.ts</span></p>
+    <p><code>groupMessagesByApiRound()</code> 以 assistant 消息的 <code>message.id</code> 变化为界，将消息分组。</p>
+    <ul>
+      <li>同一 API 响应的流式块共享 <code>message.id</code>，归入同一组</li>
+      <li><code>message.id</code> 改变意味着新的 API 轮次开始</li>
+      <li>API 约定保证每个 <code>tool_use</code> 在下一个 assistant 轮次前被解决，因此边界天然安全</li>
+      <li>对于畸形会话（如恢复/截断后出现悬空的 tool_use），由 <code>ensureToolResultPairing()</code> 在 API 调用时修复</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 第4节：系统提示词 -->
+<section id="system-prompt">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(251,191,36,0.15);">&#9733;</div>
+    <h2>4. 系统提示词构造</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/constants/systemPromptSections.ts</span> &middot; <span class="file-ref">src/utils/api.ts</span></p>
+    <h3>分段缓存架构</h3>
+    <p>系统提示词被拆分为多个可缓存的 section：</p>
+    <ul>
+      <li><code>systemPromptSection(name, computeFn)</code> &mdash; 缓存段，计算一次后复用</li>
+      <li><code>DANGEROUS_uncachedSystemPromptSection(name, computeFn, reason)</code> &mdash; 不可缓存段（每次重新计算，会导致缓存失效）</li>
+      <li><code>resolveSystemPromptSections(sections)</code> &mdash; 异步解析所有段并拼接</li>
+      <li><code>clearSystemPromptSections()</code> &mdash; 在 <code>/clear</code> 或 <code>/compact</code> 时清空缓存</li>
+    </ul>
+    <h4>动态边界分割</h4>
+    <p>通过 <code>splitSysPromptPrefix()</code> 将系统提示词在 <code>SYSTEM_PROMPT_DYNAMIC_BOUNDARY</code> 处分割：</p>
+    <ul>
+      <li><strong>静态前缀</strong>：附加 <code>cache_control</code>（ephemeral + TTL + scope），实现跨请求缓存命中</li>
+      <li><strong>动态后缀</strong>：无缓存控制，每次请求可能不同（如实时状态信息）</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>上下文拼接</h3>
+    <table>
+      <tr><th>函数</th><th>位置</th><th>说明</th></tr>
+      <tr>
+        <td><code>appendSystemContext()</code></td>
+        <td>系统提示词尾部</td>
+        <td>拼接系统上下文（如 Git 状态、当前日期等）</td>
+      </tr>
+      <tr>
+        <td><code>prependUserContext()</code></td>
+        <td>消息列表头部</td>
+        <td>前置用户上下文（CLAUDE.md 内容、内存文件等），作为第一条用户消息</td>
+      </tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>附件系统</h3>
+    <p><span class="file-ref">src/utils/attachments.ts</span></p>
+    <p>多种类型的附件会被注入到消息列表中：</p>
+    <div class="grid-3">
+      <div>
+        <h4>文件类</h4>
+        <ul>
+          <li>文件内容附件</li>
+          <li>PDF 引用附件</li>
+          <li>已编辑文件附件</li>
+          <li>目录附件</li>
+        </ul>
+      </div>
+      <div>
+        <h4>IDE 类</h4>
+        <ul>
+          <li>IDE 选区附件</li>
+          <li>IDE 打开文件附件</li>
+        </ul>
+      </div>
+      <div>
+        <h4>记忆类</h4>
+        <ul>
+          <li>嵌套记忆附件</li>
+          <li>相关记忆附件</li>
+          <li>任务/待办提醒</li>
+        </ul>
+      </div>
+    </div>
+    <p style="margin-top: 12px;">相关记忆附件有会话级累积字节上限：<code>MAX_SESSION_BYTES = 60KB</code>，通过 <code>filterDuplicateMemoryAttachments()</code> 去重。</p>
+  </div>
+</section>
+
+<!-- 第5节：Prompt 缓存 -->
+<section id="cache">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(108,138,255,0.15);">&#9729;</div>
+    <h2>5. Prompt 缓存机制</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/api/claude.ts</span> &middot; <span class="file-ref">src/services/api/promptCacheBreakDetection.ts</span></p>
+    <h3>缓存控制结构</h3>
+    <pre>{
+  type: 'ephemeral',
+  ttl?: '1h',               // 1 小时 TTL（默认 5 分钟）
+  scope?: 'global' | 'org'  // 缓存范围
+}</pre>
+    <p>缓存控制被应用于：</p>
+    <ul>
+      <li><strong>系统提示词静态前缀</strong> &mdash; 分割后的不变部分</li>
+      <li><strong>工具定义</strong> &mdash; 如果启用全局缓存范围</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>缓存中断检测</h3>
+    <p>系统持续跟踪可能导致缓存失效的状态变化：</p>
+    <div class="grid-2">
+      <div>
+        <h4>跟踪的状态参数</h4>
+        <ul>
+          <li><code>systemHash</code> &mdash; 系统提示词哈希</li>
+          <li><code>toolsHash</code> &mdash; 全部工具定义哈希</li>
+          <li><code>perToolHashes</code> &mdash; 单个工具哈希</li>
+          <li><code>cacheControlHash</code> &mdash; 缓存控制标记</li>
+          <li><code>model</code> &mdash; 模型名称</li>
+          <li><code>fastMode</code> &mdash; 快速模式开关</li>
+          <li><code>betas</code> &mdash; Beta 头部列表</li>
+          <li><code>effortValue</code> &mdash; 推理努力等级</li>
+        </ul>
+      </div>
+      <div>
+        <h4>检测常量</h4>
+        <div class="metric">
+          <span class="metric-value">2K</span>
+          <span class="metric-label">MIN_CACHE_MISS_TOKENS（触发警告的最小 token 数）</span>
+        </div>
+        <div class="metric">
+          <span class="metric-value">5 分钟</span>
+          <span class="metric-label">默认缓存 TTL</span>
+        </div>
+        <div class="metric">
+          <span class="metric-value">1 小时</span>
+          <span class="metric-label">实验性长 TTL</span>
+        </div>
+      </div>
+    </div>
+    <h4>关键函数</h4>
+    <ul>
+      <li><code>recordPromptState()</code> &mdash; 每次 API 调用前记录当前状态快照</li>
+      <li><code>checkResponseForCacheBreak()</code> &mdash; API 响应后对比快照，检测缓存命中率异常下降</li>
+      <li><code>notifyCompaction()</code> &mdash; 压缩后通知检测器，预期缓存读取会下降（避免误报）</li>
+      <li><code>notifyCacheDeletion()</code> &mdash; 缓存编辑后通知检测器</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>会话稳定性设计</h3>
+    <div class="highlight-box">
+      <strong>状态锁存（State Latching）：</strong>某些决策（Beta 头部、缓存 TTL、推理努力等级）一旦在会话中确定，便在整个会话期间保持不变。这防止了中途参数抖动导致反复缓存失效。
+    </div>
+  </div>
+</section>
+
+<!-- 第6节：工具结果预算 -->
+<section id="budget">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(244,114,182,0.15);">&#9889;</div>
+    <h2>6. 工具结果预算控制</h2>
+  </div>
+  <div class="card">
+    <p>在查询管线最早期阶段执行，对每条消息中过大的工具结果进行截断。</p>
+    <h3><code>applyToolResultBudget()</code></h3>
+    <ul>
+      <li>在微压缩<strong>之前</strong>运行</li>
+      <li>缓存微压缩仅按 <code>tool_use_id</code> 操作（不检查内容），因此截断对其不可见，两者可组合使用</li>
+      <li>截断记录可持久化到磁盘（用于 Agent 恢复和 <code>/resume</code> 场景）</li>
+      <li>无 <code>maxResultSizeChars</code> 限制的工具类型会被排除在外</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 第7节：历史裁剪 -->
+<section id="snip">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(52,211,153,0.15);">&#9986;</div>
+    <h2>7. 历史裁剪（History Snip）</h2>
+  </div>
+  <div class="card">
+    <p><span class="tag tag-green">特性开关: HISTORY_SNIP</span></p>
+    <h3><code>snipCompactIfNeeded()</code></h3>
+    <p>与微压缩<strong>不互斥</strong>，两者可同时运行。裁剪移除中间轮次的旧消息，释放的 token 数会传递给自动压缩的阈值判断。</p>
+    <ul>
+      <li>返回 <code>snipTokensFreed</code> &mdash; 裁剪释放的估算 token 数</li>
+      <li>如有变更，产出一个 <code>boundaryMessage</code></li>
+      <li><code>tokenCountWithEstimation()</code> 无法感知裁剪的效果（因为 usage 来自受保护的尾部 assistant），所以需要单独传递释放量</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 第8节：微压缩 -->
+<section id="micro">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(251,191,36,0.15);">&#9729;</div>
+    <h2>8. 微压缩（Micro Compact）</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/compact/microCompact.ts</span> &middot; <span class="file-ref">src/services/compact/cachedMicrocompact.ts</span></p>
+    <p>在每次 API 调用前执行，是最轻量的上下文回收手段。</p>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>时间触发微压缩</h3>
+      <p><span class="file-ref">src/services/compact/timeBasedMCConfig.ts</span></p>
+      <table>
+        <tr><th>参数</th><th>默认值</th><th>说明</th></tr>
+        <tr><td><code>enabled</code></td><td>true</td><td>总开关</td></tr>
+        <tr><td><code>gapThresholdMinutes</code></td><td>60</td><td>触发时间间隔（分钟）</td></tr>
+        <tr><td><code>keepRecent</code></td><td>5</td><td>保留最近 N 个结果</td></tr>
+      </table>
+      <p style="margin-top:12px;"><strong>原理：</strong>服务端 Prompt 缓存在 1 小时后过期，此时全部前缀会被重写。既然缓存已失效，不如趁机清除旧工具结果，减小重写体积。</p>
+    </div>
+    <div class="card">
+      <h3>缓存编辑微压缩</h3>
+      <p><span class="tag tag-blue">特性开关: CACHED_MICROCOMPACT</span></p>
+      <table>
+        <tr><th>参数</th><th>默认值</th><th>说明</th></tr>
+        <tr><td><code>triggerThreshold</code></td><td>12</td><td>触发所需工具结果数</td></tr>
+        <tr><td><code>keepRecent</code></td><td>3</td><td>保留最近的结果数</td></tr>
+        <tr><td><code>supportedModels</code></td><td>opus-4-6, sonnet-4-6</td><td>支持的模型列表</td></tr>
+      </table>
+      <p style="margin-top:12px;"><strong>原理：</strong>利用 API 的 <code>cache_edits</code> 功能在服务端删除工具结果，不修改本地消息，不破坏已缓存的前缀。</p>
+      <h4>状态管理</h4>
+      <pre>CachedMCState {
+  pinnedEdits: PinnedCacheEdits[]  // 已固定的缓存编辑
+  registeredTools: Set&lt;string&gt;     // 已注册的工具结果 ID
+  toolOrder: string[]              // 工具结果顺序（用于删除）
+  deletedRefs: Set&lt;string&gt;         // 已删除的引用 ID
+}</pre>
+    </div>
+  </div>
+  <div class="card">
+    <h3>可压缩工具列表</h3>
+    <p><code>FileRead</code> <code>Bash</code> <code>Grep</code> <code>Glob</code> <code>WebSearch</code> <code>WebFetch</code> <code>FileEdit</code> <code>FileWrite</code></p>
+    <h4>Token 估算</h4>
+    <p><code>estimateMessageTokens()</code> 对消息进行粗略 token 估算，带有 <strong>4/3 的保守系数</strong>。对不同内容块分别计算：文本、thinking、tool_use（名称+输入）、tool_result（文本/图片/文档）。</p>
+  </div>
+</section>
+
+<!-- 第9节：上下文折叠 -->
+<section id="collapse">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(167,139,250,0.15);">&#9881;</div>
+    <h2>9. 上下文折叠（Context Collapse）</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/contextCollapse/index.ts</span></p>
+    <p><span class="tag tag-purple">特性开关: CONTEXT_COLLAPSE</span> <span class="tag tag-yellow">实验性功能，当前默认禁用</span></p>
+    <h3>设计理念</h3>
+    <p>提供比消息裁剪更细粒度的上下文管理。通过维护一个"已提交日志"（committed log），将旧的消息组摘要化而不是完全删除。</p>
+    <h4>阈值设计</h4>
+    <table>
+      <tr><th>阈值</th><th>占有效窗口比例</th><th>触发动作</th></tr>
+      <tr><td>提交阈值</td><td>~90%</td><td>开始将旧轮次折叠为摘要</td></tr>
+      <tr><td>阻塞产出阈值</td><td>~95%</td><td>阻止新的子代理产出</td></tr>
+    </table>
+    <h4>与自动压缩的关系</h4>
+    <p>当折叠功能启用时，<strong>主动自动压缩被禁用</strong>（因为自动压缩在 ~93% 触发，恰好位于折叠的两个阈值之间，两者会竞争）。但响应式压缩作为 413 错误的兜底仍然保留。</p>
+    <h4>接口</h4>
+    <pre>initContextCollapse()           // 初始化
+resetContextCollapse()          // 重置（压缩后调用）
+applyCollapsesIfNeeded()        // 应用折叠到消息视图
+recoverFromOverflow()           // 溢出恢复
+projectView(messages)           // 投射折叠后的上下文视图</pre>
+    <div class="highlight-box warn">
+      <strong>注意：</strong>折叠是读取时的投射（projection），不修改 REPL 的完整消息历史。摘要存储在折叠存储中，而非 REPL 数组中。这使得折叠可以跨轮次持久化。
+    </div>
+  </div>
+</section>
+
+<!-- 第10节：完整压缩 -->
+<section id="compact">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(108,138,255,0.15);">&#9998;</div>
+    <h2>10. 完整压缩（Full Compact）</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/services/compact/compact.ts</span> &middot; <span class="file-ref">src/services/compact/prompt.ts</span></p>
+    <h3>压缩提示词结构</h3>
+    <p>压缩时使用特制的提示词指导模型生成摘要。有两种模板：</p>
+    <div class="grid-2">
+      <div>
+        <h4>全量压缩 <code>BASE_COMPACT_PROMPT</code></h4>
+        <p>对整个对话进行摘要</p>
+      </div>
+      <div>
+        <h4>部分压缩 <code>PARTIAL_COMPACT_PROMPT</code></h4>
+        <p>仅摘要最近部分，早期消息保持原样</p>
+      </div>
+    </div>
+    <h4>摘要包含的 9 个章节</h4>
+    <ol>
+      <li><strong>主要需求和意图</strong> &mdash; 用户的所有显式请求</li>
+      <li><strong>关键技术概念</strong> &mdash; 涉及的技术栈和框架</li>
+      <li><strong>文件和代码段</strong> &mdash; 查看/修改/创建的文件，含代码片段</li>
+      <li><strong>错误与修复</strong> &mdash; 遇到的错误及解决方案</li>
+      <li><strong>问题解决</strong> &mdash; 已解决的问题和进行中的排查</li>
+      <li><strong>所有用户消息</strong> &mdash; 非工具结果的用户发言（完整列出）</li>
+      <li><strong>待办任务</strong> &mdash; 明确要求但尚未完成的任务</li>
+      <li><strong>当前工作</strong> &mdash; 压缩前正在进行的工作（含文件名和代码）</li>
+      <li><strong>可选下一步</strong> &mdash; 下一步计划（需与用户最近请求直接相关）</li>
+    </ol>
+    <div class="highlight-box">
+      <strong>防止工具调用：</strong>压缩提示词以 <code>NO_TOOLS_PREAMBLE</code> 开头和 <code>NO_TOOLS_TRAILER</code> 结尾，强调禁止调用工具。在 Sonnet 4.6 上曾出现模型无视指令尝试工具调用的情况（2.79% vs 4.5 的 0.01%），前置强调可避免浪费轮次。
+    </div>
+  </div>
+  <div class="card">
+    <h3>压缩后处理</h3>
+    <p><span class="file-ref">src/services/compact/postCompactCleanup.ts</span></p>
+    <p><code>runPostCompactCleanup()</code> 清理压缩后失效的缓存和跟踪状态：</p>
+    <div class="grid-2">
+      <div>
+        <h4>清理的内容</h4>
+        <ul>
+          <li>微压缩状态</li>
+          <li>上下文折叠存储（仅主线程）</li>
+          <li>记忆文件缓存</li>
+          <li>系统提示词段缓存</li>
+          <li>分类器审批记录</li>
+          <li>推测性检查结果</li>
+          <li>Beta 追踪状态</li>
+          <li>会话消息缓存</li>
+        </ul>
+      </div>
+      <div>
+        <h4>保留的内容</h4>
+        <ul>
+          <li><strong>技能内容</strong> &mdash; 必须跨多次压缩存活，以便后续压缩附件中包含完整技能文本</li>
+        </ul>
+        <h4>恢复的内容</h4>
+        <ul>
+          <li>CLAUDE.md 文件（通过 session start hooks）</li>
+          <li>技能文件（每个最大 5KB，总预算 25K）</li>
+          <li>最多恢复 5 个文件，总预算 50K token</li>
+        </ul>
+      </div>
+    </div>
+    <div class="highlight-box warn">
+      <strong>子代理安全：</strong>子代理与主线程共享进程和模块级状态。只有主线程的压缩才会重置上下文折叠存储和记忆文件缓存等共享状态，防止子代理压缩破坏主线程状态。
+    </div>
+  </div>
+</section>
+
+<!-- 第11节：错误恢复 -->
+<section id="recovery">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(239,68,68,0.15);">&#9888;</div>
+    <h2>11. 错误恢复机制</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/query.ts</span> 错误处理分支</p>
+    <h3>上下文溢出恢复</h3>
+    <table>
+      <tr><th>错误类型</th><th>恢复策略</th></tr>
+      <tr>
+        <td><code>prompt_too_long</code> (413)</td>
+        <td>
+          <ol>
+            <li>如果上下文折叠启用 &rarr; 尝试 <code>recoverFromOverflow()</code></li>
+            <li>如果响应式压缩启用 &rarr; 尝试响应式压缩</li>
+            <li>否则 &rarr; 返回错误消息给用户</li>
+          </ol>
+        </td>
+      </tr>
+      <tr>
+        <td><code>max_output_tokens</code></td>
+        <td>
+          <ol>
+            <li>首次：将 <code>maxOutputTokens</code> 升级到 <code>ESCALATED_MAX_TOKENS</code> (64K) 重试</li>
+            <li>再次失败：返回截断结果</li>
+          </ol>
+        </td>
+      </tr>
+      <tr>
+        <td>媒体处理错误</td>
+        <td>移除导致问题的图片/PDF，用文本替代后重试</td>
+      </tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>阻塞限制</h3>
+    <p>在实际调用 API 之前，查询管线会检查是否已达到<strong>阻塞限制</strong>（<code>effectiveWindow - 3K</code>，约 98%）：</p>
+    <ul>
+      <li>以下场景<strong>跳过</strong>阻塞检查：<code>compact</code>、<code>session_memory</code> 来源；响应式压缩或上下文折叠管理上下文时</li>
+      <li>如果达到阻塞限制，直接向用户返回 <code>PROMPT_TOO_LONG_ERROR_MESSAGE</code>，不发送 API 请求</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 第12节：上下文分析 -->
+<section id="analysis">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(52,211,153,0.15);">&#9670;</div>
+    <h2>12. 上下文分析工具</h2>
+  </div>
+  <div class="card">
+    <p><span class="file-ref">src/utils/contextAnalysis.ts</span></p>
+    <h3><code>analyzeContext()</code></h3>
+    <p>对当前上下文进行全面的 token 统计分析，返回 <code>TokenStats</code> 对象：</p>
+    <table>
+      <tr><th>统计项</th><th>说明</th></tr>
+      <tr><td><code>toolRequests</code></td><td>按工具名统计的工具调用请求 token 数</td></tr>
+      <tr><td><code>toolResults</code></td><td>按工具名统计的工具结果 token 数</td></tr>
+      <tr><td><code>humanMessages</code></td><td>用户消息总 token 数</td></tr>
+      <tr><td><code>assistantMessages</code></td><td>助手消息总 token 数</td></tr>
+      <tr><td><code>localCommandOutputs</code></td><td>本地命令输出 token 数</td></tr>
+      <tr><td><code>attachments</code></td><td>各类型附件计数</td></tr>
+      <tr><td><code>duplicateFileReads</code></td><td>重复文件读取统计（次数和浪费 token 数）</td></tr>
+      <tr><td><code>total</code></td><td>总 token 数</td></tr>
+    </table>
+    <p>该功能用于 <code>/context</code> 命令，帮助用户理解上下文窗口的使用分布。</p>
+  </div>
+</section>
+
+<!-- 第13节：输出 Token 管理 -->
+<section id="output">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(244,114,182,0.15);">&#9733;</div>
+    <h2>13. 输出 Token 管理</h2>
+  </div>
+  <div class="card">
+    <h3>槽位预留优化</h3>
+    <p>默认 <code>max_output_tokens</code> 为 32K-64K，但 p99 实际输出仅 4,911 token，导致 8-16 倍的槽位过度预留。</p>
+    <ul>
+      <li><strong>优化方案</strong>：<code>CAPPED_DEFAULT_MAX_TOKENS = 8,000</code> 作为初始上限</li>
+      <li>不到 1% 的请求会触发上限，这些请求以 64K 重试一次</li>
+      <li>重试通过 <code>query.ts</code> 中的 <code>max_output_tokens_escalate</code> 逻辑实现</li>
+    </ul>
+    <h3>任务预算跟踪</h3>
+    <p>通过 <code>taskBudget</code> 参数传递总预算和剩余量。压缩时，根据 <code>finalContextTokensFromLastResponse()</code>（input + output，不含 cache）计算消耗，从剩余预算中扣除。</p>
+  </div>
+</section>
+
+<!-- 第14节：端到端数据流 -->
+<section id="e2e">
+  <div class="section-header">
+    <div class="section-icon" style="background: rgba(108,138,255,0.15);">&#8644;</div>
+    <h2>14. 端到端数据流</h2>
+  </div>
+  <div class="card">
+    <h3>完整上下文组装流程</h3>
+    <div class="flow-diagram">用户输入
+  |
+  v
++-------------------------------+
+|  处理附件、记忆、技能          |  processUserInput()
+|  创建 UserMessage             |
++-------------------------------+
+  |
+  v
++-------------------------------+
+|  提取压缩边界后的消息          |  getMessagesAfterCompactBoundary()
++-------------------------------+
+  |
+  v
++-------------------------------+
+|  工具结果预算截断              |  applyToolResultBudget()
+|  (过大的 tool_result 被截断)   |
++-------------------------------+
+  |
+  v
++-------------------------------+
+|  历史裁剪 (Snip)              |  snipCompactIfNeeded()
+|  [特性开关: HISTORY_SNIP]      |  (移除旧的中间轮次)
++-------------------------------+
+  |
+  v
++-------------------------------+
+|  微压缩                       |  microcompactMessages()
+|  - 时间触发: 直接清理内容      |
+|  - 缓存编辑: cache_edits API  |
++-------------------------------+
+  |
+  v
++-------------------------------+
+|  上下文折叠                    |  applyCollapsesIfNeeded()
+|  [特性开关: CONTEXT_COLLAPSE]  |  (投射折叠视图)
++-------------------------------+
+  |
+  v
++-------------------------------+
+|  自动压缩                      |  autoCompactIfNeeded()
+|  (Token > ~93% 时触发)         |
+|  1. 尝试会话记忆压缩(零API)    |
+|  2. 尝试传统压缩(1次API)       |
++-------------------------------+
+  |
+  v
++-------------------------------+
+|  阻塞限制检查                  |  calculateTokenWarningState()
+|  (Token > ~98% 时阻塞)        |
++-------------------------------+
+  |
+  v
++-------------------------------+       +------------------+
+|  规范化消息                    | ----> | 合并同源记录      |
+|  normalizeMessagesForAPI()     |       | 剥离内部标记      |
+|                                |       | 确保工具配对      |
++-------------------------------+       +------------------+
+  |
+  v
++-------------------------------+
+|  拼接最终请求                  |
+|  - prependUserContext()        |  用户上下文 -> 消息头部
+|  - appendSystemContext()       |  系统上下文 -> 系统提示词
+|  - toolToAPISchema()           |  工具定义转换
+|  - splitSysPromptPrefix()      |  缓存控制标记
++-------------------------------+
+  |
+  v
++-------------------------------+
+|     API 请求                   |
+|  [系统提示词 + 工具 + 消息]    |  queryModelWithStreaming()
+|  [+ thinking 配置]             |
+|  [+ 缓存控制 + Beta 头部]     |
++-------------------------------+
+  |
+  v
++-------------------------------+
+|  响应处理                      |
+|  - 更新 token 使用量           |
+|  - 缓存中断检测                |
+|  - 错误恢复(重试/压缩/降级)    |
++-------------------------------+</div>
+  </div>
+  <div class="card">
+    <h3>上下文构成公式</h3>
+    <pre>总 Token 数 =
+  系统提示词 Token（静态前缀 + 动态后缀）
+  + 用户上下文 Token（CLAUDE.md、记忆文件等）
+  + 系统上下文 Token（Git 状态、日期等）
+  + 工具定义 Token（所有已注册工具的 JSON Schema）
+  + 消息 Token（用户消息 + 助手消息 + 附件）
+  + 输出 Token（模型生成的回复）
+
+其中消息 Token = Σ(
+  文本块 + thinking 块 + tool_use 块(名称+输入)
+  + tool_result 块(文本/图片/文档)
+  + 附件内容
+)</pre>
+  </div>
+  <div class="card">
+    <h3>关键源码文件索引</h3>
+    <table>
+      <tr><th>文件</th><th>职责</th></tr>
+      <tr><td><code>src/query.ts</code></td><td>查询管线主循环 &mdash; 编排所有上下文管理阶段</td></tr>
+      <tr><td><code>src/utils/context.ts</code></td><td>上下文窗口配置与模型参数</td></tr>
+      <tr><td><code>src/utils/messages.ts</code></td><td>消息创建、规范化、边界标记</td></tr>
+      <tr><td><code>src/utils/tokens.ts</code></td><td>Token 计数与上下文大小估算</td></tr>
+      <tr><td><code>src/utils/api.ts</code></td><td>API 请求组装（工具转换、上下文拼接、缓存控制）</td></tr>
+      <tr><td><code>src/utils/contextAnalysis.ts</code></td><td>上下文 Token 分布分析</td></tr>
+      <tr><td><code>src/utils/attachments.ts</code></td><td>附件系统（文件/IDE/记忆附件管理）</td></tr>
+      <tr><td><code>src/services/api/claude.ts</code></td><td>API 调用实现（缓存策略、参数构建）</td></tr>
+      <tr><td><code>src/services/api/promptCacheBreakDetection.ts</code></td><td>Prompt 缓存中断检测与状态跟踪</td></tr>
+      <tr><td><code>src/services/compact/microCompact.ts</code></td><td>微压缩（时间触发 + 缓存编辑）</td></tr>
+      <tr><td><code>src/services/compact/cachedMicrocompact.ts</code></td><td>缓存编辑微压缩实现</td></tr>
+      <tr><td><code>src/services/compact/timeBasedMCConfig.ts</code></td><td>时间触发微压缩配置</td></tr>
+      <tr><td><code>src/services/compact/compact.ts</code></td><td>传统压缩算法</td></tr>
+      <tr><td><code>src/services/compact/prompt.ts</code></td><td>压缩提示词模板（9 章节摘要格式）</td></tr>
+      <tr><td><code>src/services/compact/grouping.ts</code></td><td>API 轮次消息分组</td></tr>
+      <tr><td><code>src/services/compact/postCompactCleanup.ts</code></td><td>压缩后状态清理</td></tr>
+      <tr><td><code>src/services/contextCollapse/index.ts</code></td><td>上下文折叠系统接口</td></tr>
+      <tr><td><code>src/constants/systemPromptSections.ts</code></td><td>系统提示词分段缓存管理</td></tr>
+    </table>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  Claude Code 上下文管理系统深度解析 &mdash; 源码分析 &mdash; 2026-04-08
+</footer>
+
+</body>
+</html>

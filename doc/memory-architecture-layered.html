@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code 内存管理架构 — 原理分层视角（修订版）</title>
+<style>
+  :root {
+    --bg:#0a0c14; --card:#151826; --border:#252839;
+    --text:#e8e8ef; --text-dim:#8b8fa3;
+    --l1:#34d399; --l2:#22d3ee; --l3:#6c8aff;
+    --l4:#a78bfa; --l5:#f472b6; --l6:#fbbf24;
+    --code-bg:#10131f;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',-apple-system,'PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--text); line-height:1.7; }
+
+  .hero { background:linear-gradient(180deg,#0f1320 0%,#0a0c14 100%); padding:64px 40px 48px; text-align:center; border-bottom:1px solid var(--border); position:relative; overflow:hidden; }
+  .hero::before { content:''; position:absolute; inset:-50%; width:200%; height:200%; background:radial-gradient(circle at 20% 30%,rgba(52,211,153,0.05) 0%,transparent 40%),radial-gradient(circle at 80% 70%,rgba(167,139,250,0.05) 0%,transparent 40%); }
+  .hero h1 { font-size:2.3em; font-weight:700; position:relative; margin-bottom:14px; background:linear-gradient(135deg,#34d399,#6c8aff,#a78bfa,#f472b6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  .hero p { color:var(--text-dim); font-size:1.05em; position:relative; max-width:720px; margin:0 auto; }
+  .container { max-width:1280px; margin:0 auto; padding:40px 24px; }
+
+  /* === 反思框 === */
+  .rethink { background:var(--card); border:1px solid var(--border); border-left:4px solid #ef4444; border-radius:10px; padding:24px; margin-bottom:48px; }
+  .rethink h2 { font-size:1.2em; color:#ef4444; margin-bottom:12px; }
+  .rethink p, .rethink li { color:var(--text-dim); font-size:0.93em; line-height:1.8; }
+  .rethink ul { padding-left:20px; margin:8px 0; }
+  .rethink strong { color:var(--text); }
+
+  /* === 依赖图 === */
+  .dep-section { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:32px; margin-bottom:48px; }
+  .dep-section h2 { font-size:1.3em; text-align:center; margin-bottom:24px; }
+  .dep-diagram { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:24px; font-family:'JetBrains Mono',monospace; font-size:0.8em; line-height:1.8; color:var(--text-dim); overflow-x:auto; white-space:pre; }
+
+  /* === 层样式 === */
+  .layer { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:32px; margin-bottom:32px; position:relative; }
+  .layer-header { display:flex; align-items:flex-start; gap:16px; margin-bottom:24px; padding-bottom:16px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  .layer-num { width:48px; height:48px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1.2em; flex-shrink:0; }
+  .layer-title { flex:1; min-width:200px; }
+  .layer-title h2 { font-size:1.35em; font-weight:600; margin-bottom:4px; }
+  .layer-title .role { font-size:0.88em; color:var(--text-dim); }
+  .layer-title .exists { font-size:0.82em; color:var(--text-dim); margin-top:8px; font-style:italic; }
+  .layer-tag { padding:4px 14px; border-radius:20px; font-size:0.78em; font-weight:600; background:var(--code-bg); border:1px solid var(--border); white-space:nowrap; }
+  .layer-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width:900px) { .layer-grid { grid-template-columns:1fr; } }
+
+  .lc1 { border-top:3px solid var(--l1); } .lc1 .layer-num { background:rgba(52,211,153,0.12); color:var(--l1); } .lc1 .layer-tag { color:var(--l1); border-color:rgba(52,211,153,0.3); }
+  .lc2 { border-top:3px solid var(--l2); } .lc2 .layer-num { background:rgba(34,211,238,0.12); color:var(--l2); } .lc2 .layer-tag { color:var(--l2); border-color:rgba(34,211,238,0.3); }
+  .lc3 { border-top:3px solid var(--l3); } .lc3 .layer-num { background:rgba(108,138,255,0.12); color:var(--l3); } .lc3 .layer-tag { color:var(--l3); border-color:rgba(108,138,255,0.3); }
+  .lc4 { border-top:3px solid var(--l4); } .lc4 .layer-num { background:rgba(167,139,250,0.12); color:var(--l4); } .lc4 .layer-tag { color:var(--l4); border-color:rgba(167,139,250,0.3); }
+  .lc5 { border-top:3px solid var(--l5); } .lc5 .layer-num { background:rgba(244,114,182,0.12); color:var(--l5); } .lc5 .layer-tag { color:var(--l5); border-color:rgba(244,114,182,0.3); }
+  .lc6 { border-top:3px solid var(--l6); } .lc6 .layer-num { background:rgba(251,191,36,0.12); color:var(--l6); } .lc6 .layer-tag { color:var(--l6); border-color:rgba(251,191,36,0.3); }
+
+  .panel { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:18px; }
+  .panel h4 { font-size:0.78em; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:12px; }
+  .panel ul { list-style:none; padding:0; }
+  .panel li { padding:5px 0; color:var(--text-dim); font-size:0.88em; line-height:1.7; border-bottom:1px dashed rgba(255,255,255,0.04); }
+  .panel li:last-child { border-bottom:none; }
+  .panel li strong { color:var(--text); font-weight:500; }
+  code { background:#0a0c14; padding:2px 6px; border-radius:3px; font-family:'JetBrains Mono',monospace; font-size:0.86em; color:var(--l1); }
+  .v { color:var(--l6); font-weight:500; }
+
+  .principle { background:linear-gradient(135deg,rgba(108,138,255,0.06),rgba(167,139,250,0.06)); border:1px solid rgba(108,138,255,0.15); border-radius:10px; padding:16px 20px; margin-top:16px; }
+  .principle .lb { display:inline-block; padding:2px 10px; border-radius:12px; background:rgba(108,138,255,0.15); color:var(--l3); font-size:0.75em; font-weight:600; margin-bottom:8px; }
+  .principle p { color:var(--text); font-size:0.92em; }
+
+  .cross { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:28px; margin-bottom:32px; border-left:4px solid #8b8fa3; }
+  .cross h3 { font-size:1.1em; margin-bottom:14px; color:var(--text); }
+  .cross p, .cross li { color:var(--text-dim); font-size:0.92em; }
+  .cross ul { padding-left:20px; margin:8px 0; }
+
+  footer { text-align:center; padding:40px 20px; color:var(--text-dim); font-size:0.85em; border-top:1px solid var(--border); margin-top:60px; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>内存管理架构 &mdash; 原理分层（修订版）</h1>
+  <p>基于代码模块边界和真实依赖关系重新推导的 6 层架构<br>每一层的存在都有代码级的依赖证据</p>
+</div>
+
+<div class="container">
+
+<!-- ===== 反思 ===== -->
+<div class="rethink">
+  <h2>前一版的问题</h2>
+  <p>前一版 8 层架构有几个不诚实之处：</p>
+  <ul>
+    <li><strong>L1 (物理存储) 和 L3 (访问控制) 被人为拆分</strong> &mdash; 代码中它们在同一个模块 <code>memdir/</code> 里，paths.ts 和 teamMemPaths.ts 同时处理路径和安全。拆成两层是概念上的"好看"而非代码上的"真实"。</li>
+    <li><strong>L7 (调度集成) 不是一个层</strong> &mdash; 钩子和子代理调度不构成独立的抽象层，它们是 query.ts 和各模块内部的胶水代码。给胶水代码命名为"层"是抬高了它的地位。</li>
+    <li><strong>L8 (控制策略) 不是一个层</strong> &mdash; 特性开关、熔断器、配置渗透在每一层中。它是<strong>横切关注点</strong>（cross-cutting concern），不是一个分层。强行放在顶部暗示它"管理其他层"，但实际上它只是 if 判断散落在各处。</li>
+    <li><strong>L5 (提取生成) 混合了三个独立子系统</strong> &mdash; Session Memory、Auto Memory、Auto Dream 有不同的触发时机、不同的输出目标、不同的生命周期。把它们塞进一层掩盖了差异。</li>
+  </ul>
+  <p style="margin-top:12px;"><strong>修订原则：</strong>每一层的边界必须能在代码的 <code>import</code> 依赖关系中找到证据。如果两个东西互相导入、共享生命周期，它们是同一层；如果一个东西只被另一个东西导入，它是后者的子模块而非独立的层。</p>
+</div>
+
+<!-- ===== 真实依赖图 ===== -->
+<div class="dep-section">
+  <h2>代码模块依赖关系（import 图）</h2>
+  <div class="dep-diagram">                      query.ts (管线编排)
+                      |
+          +-----------+-----------+
+          |                       |
+    attachments.ts           compact/ (上下文压缩)
+    (记忆注入)                    |
+          |                 sessionMemoryCompact.ts
+          |                       |
+    +-----+-----+           +----+----+
+    |           |           |         |
+ findRelevant  memoryAge   SessionMemory/   extractMemories/   autoDream/
+ Memories.ts   .ts         (会话记忆)       (持久记忆)         (合并)
+    |                       |                |                  |
+    +------+------+---------+----+-----------+-------+----------+
+           |      |              |                   |
+       memoryScan.ts         memdir.ts           paths.ts
+                              (MEMORY.md)         (目录)
+           |      |              |                   |
+           +------+--------------+-------------------+
+                         |
+                    memoryTypes.ts
+                    (4 种类型 + frontmatter 契约)
+
+  横切关注点（不是层，而是散布的 if 判断）：
+  - GrowthBook 特性开关 (tengu_*)
+  - 环境变量覆盖 (CLAUDE_CODE_*)
+  - 熔断器 (consecutiveFailures)
+  - 权限沙箱 (createAutoMemCanUseTool)</div>
+</div>
+
+<!-- ===== 修订后 6 层 ===== -->
+<div class="dep-section">
+  <h2>修订后的 6 层架构</h2>
+  <div class="dep-diagram" style="font-size:0.85em; text-align:center;">
++====================================================================+
+|  L6  <span style="color:var(--l6);">上下文桥接</span>  compact/ ← SessionMemory/ → attachments.ts   |
+|       把记忆与上下文窗口管理连接起来                                 |
++====================================================================+
+          |                    |                   |
++==================+  +=================+  +==================+
+| L5a <span style="color:var(--l5);">会话记忆</span>     |  | L5b <span style="color:var(--l5);">持久记忆</span>    |  | L5c <span style="color:var(--l5);">记忆合并</span>    |
+| SessionMemory/   |  | extractMemories/|  | autoDream/       |
+| postSamplingHook |  | handleStopHooks |  | 24h+5会话门控    |
++==================+  +=================+  +==================+
+          |                    |                   |
++====================================================================+
+|  L4  <span style="color:var(--l4);">检索与注入</span>  findRelevantMemories → Sonnet → attachments   |
+|       从已有记忆中选出相关的，注入到对话上下文                       |
++====================================================================+
+          |
++====================================================================+
+|  L3  <span style="color:var(--l3);">扫描与索引</span>  memoryScan.ts + memdir.ts + memoryAge.ts        |
+|       读取文件系统，构建记忆清单，管理 MEMORY.md 索引               |
++====================================================================+
+          |
++====================================================================+
+|  L2  <span style="color:var(--l2);">数据契约</span>    memoryTypes.ts + frontmatter + 会话模板           |
+|       记忆长什么样 — 格式定义，读写双方共同遵守                     |
++====================================================================+
+          |
++====================================================================+
+|  L1  <span style="color:var(--l1);">存储与寻址</span>  paths.ts + teamMemPaths.ts + 文件权限              |
+|       记忆在哪、谁能碰 — 目录结构 + 路径安全                       |
++====================================================================+</div>
+</div>
+
+<!-- ===== L1 存储与寻址 ===== -->
+<div class="layer lc1" id="layer1">
+  <div class="layer-header">
+    <div class="layer-num">L1</div>
+    <div class="layer-title">
+      <h2>存储与寻址</h2>
+      <div class="role">回答的问题：记忆在哪？谁能碰？</div>
+      <div class="exists"><strong>存在理由：</strong>所有上层模块都 import paths.ts 或 teamMemPaths.ts 来确定读写位置。这是代码中被依赖最多的模块，改它会影响全部上层。</div>
+    </div>
+    <div class="layer-tag" style="color:var(--l1); border-color:rgba(52,211,153,0.3);">src/memdir/paths.ts &middot; teamMemPaths.ts</div>
+  </div>
+
+  <div class="layer-grid">
+    <div class="panel">
+      <h4>路径解析（3 级优先级）</h4>
+      <ul>
+        <li><strong>1. 环境变量覆盖</strong> &mdash; <code>CLAUDE_COWORK_MEMORY_PATH_OVERRIDE</code></li>
+        <li><strong>2. settings.json</strong> &mdash; <code>autoMemoryDirectory</code>（仅信任来源）</li>
+        <li><strong>3. 默认约定</strong> &mdash; <code>~/.claude/projects/&lt;git-root&gt;/memory/</code></li>
+        <li>Worktree 共享：<code>findCanonicalGitRoot()</code></li>
+        <li>记忆化：<code>getAutoMemPath()</code> 缓存结果避免 stat</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>路径安全（与存储合并的原因）</h4>
+      <ul>
+        <li>在代码中 <code>teamMemPaths.ts</code> 同时做目录构造和安全验证</li>
+        <li>5 种遍历攻击防护（null/URL 编码/Unicode/反斜杠/绝对路径）</li>
+        <li><code>realpathDeepestExisting()</code> 符号链接解析</li>
+        <li>前缀攻击防护（要求分隔符紧跟）</li>
+        <li>文件 <code>0o600</code> / 目录 <code>0o700</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="principle">
+    <div class="lb">设计原理</div>
+    <p><strong>路径即安全边界。</strong>前一版把"存储"和"访问控制"拆成两层是错误的。代码中 paths.ts 的每个函数既在构造路径、又在验证路径安全。<code>isAutoMemPath()</code> 同时回答"这个路径在记忆目录下吗"和"这个路径安全吗"。在文件系统方案中，路径和安全是同一个关注点，不可分割。</p>
+  </div>
+</div>
+
+<!-- ===== L2 数据契约 ===== -->
+<div class="layer lc2" id="layer2">
+  <div class="layer-header">
+    <div class="layer-num">L2</div>
+    <div class="layer-title">
+      <h2>数据契约</h2>
+      <div class="role">回答的问题：记忆长什么样？读写双方遵守什么格式？</div>
+      <div class="exists"><strong>存在理由：</strong>memoryTypes.ts 定义的类型和 frontmatter 格式被 L3 (扫描时解析)、L5 (提取时写入) 和 L4 (注入时展示) 共同依赖。它是读写双方的契约，改它需要同步修改两侧。</div>
+    </div>
+    <div class="layer-tag" style="color:var(--l2); border-color:rgba(34,211,238,0.3);">src/memdir/memoryTypes.ts &middot; SessionMemory/prompts.ts (模板部分)</div>
+  </div>
+
+  <div class="layer-grid">
+    <div class="panel">
+      <h4>持久记忆格式</h4>
+      <ul>
+        <li><strong>4 种类型</strong>：user / feedback / project / reference</li>
+        <li><strong>Frontmatter 字段</strong>：name / description / type</li>
+        <li><strong>内容约定</strong>：feedback/project 带 <code>**Why:**</code> 和 <code>**How to apply:**</code></li>
+        <li><strong>MEMORY.md 条目</strong>：一行 ~150 字符 <code>- [Title](file.md) — 钩子</code></li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>会话记忆格式</h4>
+      <ul>
+        <li><strong>12 个分区</strong>：Title / State / Task / Files / Workflow / Errors / Docs / Learnings / Results / Worklog 等</li>
+        <li><strong>每分区上限</strong>：<span class="v">2,000</span> token</li>
+        <li><strong>总计上限</strong>：<span class="v">12,000</span> token</li>
+        <li>分区标题和斜体描述不可修改，仅编辑内容</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="principle">
+    <div class="lb">设计原理</div>
+    <p><strong>契约层独立于实现。</strong>L2 不做任何 I/O，不调用 LLM，不写文件。它只回答"记忆应该长什么样"。这让 L3 (扫描) 和 L5 (提取) 可以独立演化 &mdash; 只要双方遵守相同的 frontmatter 格式和分区模板，它们不需要知道彼此的存在。</p>
+  </div>
+</div>
+
+<!-- ===== L3 扫描与索引 ===== -->
+<div class="layer lc3" id="layer3">
+  <div class="layer-header">
+    <div class="layer-num">L3</div>
+    <div class="layer-title">
+      <h2>扫描与索引</h2>
+      <div class="role">回答的问题：当前有哪些记忆？它们的元信息是什么？</div>
+      <div class="exists"><strong>存在理由：</strong>memoryScan.ts 被 L4 (findRelevantMemories) 和 L5 (extractMemories 的清单注入) 共同依赖。它把文件系统状态转化为内存中的结构化清单，是读写两侧的共享基础设施。</div>
+    </div>
+    <div class="layer-tag" style="color:var(--l3); border-color:rgba(108,138,255,0.3);">memoryScan.ts &middot; memdir.ts &middot; memoryAge.ts</div>
+  </div>
+
+  <div class="layer-grid">
+    <div class="panel">
+      <h4>文件扫描 memoryScan.ts</h4>
+      <ul>
+        <li>递归扫描 <code>.md</code> 文件，排除 MEMORY.md</li>
+        <li><code>Promise.allSettled()</code> 并行读 frontmatter</li>
+        <li>仅读前 <span class="v">30</span> 行（性能优化）</li>
+        <li>单次 I/O：stat + 读取同时完成</li>
+        <li>按 mtime 降序，返回前 <span class="v">200</span> 个 MemoryHeader</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>索引管理 memdir.ts</h4>
+      <ul>
+        <li>MEMORY.md 加载与截断（<span class="v">200</span> 行 / <span class="v">25KB</span>）</li>
+        <li>先按行截断，再按字节截断</li>
+        <li>追加截断警告（指明触发了哪个限制）</li>
+        <li><code>ensureMemoryDirExists()</code> 幂等初始化</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>新鲜度标记 memoryAge.ts</h4>
+      <ul>
+        <li><code>memoryAge()</code> &rarr; <code>'today'</code> / <code>'yesterday'</code> / <code>'N days ago'</code></li>
+        <li>&le;1 天：无警告</li>
+        <li>&gt;1 天：附加 <code>&lt;system-reminder&gt;</code> 提醒模型验证</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>为什么是独立一层</h4>
+      <ul>
+        <li>L4 (检索) 调用 <code>scanMemoryFiles()</code> 获取清单</li>
+        <li>L5 (提取) 调用 <code>formatMemoryManifest()</code> 注入提示词</li>
+        <li>L6 (压缩桥) 通过 memdir.ts 读取 MEMORY.md</li>
+        <li><strong>被三个上层共同依赖</strong>，证明它是真实的分界面</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="principle">
+    <div class="lb">设计原理</div>
+    <p><strong>扫描是记忆系统的"感知器官"。</strong>它把文件系统的物理状态（散落的 .md 文件）转化为上层可消费的结构化信息（MemoryHeader 列表 + MEMORY.md 内容）。所有上层操作 &mdash; 检索、提取、压缩 &mdash; 都不直接触碰文件系统，而是通过 L3 提供的抽象来感知记忆世界的状态。</p>
+  </div>
+</div>
+
+<!-- ===== L4 检索与注入 ===== -->
+<div class="layer lc4" id="layer4">
+  <div class="layer-header">
+    <div class="layer-num">L4</div>
+    <div class="layer-title">
+      <h2>检索与注入</h2>
+      <div class="role">回答的问题：当前对话需要哪些记忆？怎么放进去？</div>
+      <div class="exists"><strong>存在理由：</strong>findRelevantMemories.ts 是唯一调用外部 LLM (Sonnet) 做相关性判断的模块。它依赖 L3 (扫描) 提供清单，被 query.ts (通过 attachments.ts) 消费。它有独立的 I/O 模式（LLM 调用）和独立的预取生命周期（Disposable），与其他层明显不同。</div>
+    </div>
+    <div class="layer-tag" style="color:var(--l4); border-color:rgba(167,139,250,0.3);">findRelevantMemories.ts &middot; attachments.ts (记忆部分)</div>
+  </div>
+
+  <div class="layer-grid">
+    <div class="panel">
+      <h4>相关性选择算法</h4>
+      <ul>
+        <li>输入：L3 的 MemoryHeader 清单</li>
+        <li>过滤：已展示过的 + 已读过的</li>
+        <li><strong>调用 Sonnet 3.5</strong> 判断相关性</li>
+        <li>输出：最多 <span class="v">5</span> 个文件名 (JSON Schema 约束)</li>
+        <li>工具过滤：使用中的工具文档不展示，但警告仍展示</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>注入机制</h4>
+      <ul>
+        <li>作为 <code>relevant_memories</code> 附件注入</li>
+        <li>每文件 <span class="v">4KB</span>，每轮 <span class="v">5</span> 个，会话 <span class="v">60KB</span></li>
+        <li>截断时追加 FileReadTool 链接</li>
+        <li>陈旧记忆附加新鲜度警告头</li>
+        <li>压缩后重置累计计数（可重新注入）</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>非阻塞预取</h4>
+      <ul>
+        <li><code>startRelevantMemoryPrefetch()</code> 在 query.ts 入口启动</li>
+        <li>使用 <code>using</code> 语法（Disposable），所有退出路径自动释放</li>
+        <li>消费点在 1600 行左右检查 <code>settledAt</code></li>
+        <li><strong>永不阻塞</strong>：未就绪就跳过</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>为什么 LLM 检索是独立层</h4>
+      <ul>
+        <li>它是<strong>唯一在读路径上调用外部 LLM 的模块</strong></li>
+        <li>有独立的异步生命周期（预取 + Disposable）</li>
+        <li>有独立的失败模式（Sonnet 调用失败 &rarr; 跳过注入）</li>
+        <li>与 L5 (写入) 完全独立 &mdash; 代码中没有交叉导入</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="principle">
+    <div class="lb">设计原理</div>
+    <p><strong>读写分离 + 读路径永不阻塞。</strong>L4 (检索) 和 L5 (提取) 在代码中没有任何 import 关系，它们通过 L3 的共享清单间接协作。预取的 Disposable 模式保证即使 Sonnet 调用超时或失败，主对话也不受影响。这是整个系统最关键的延迟保证。</p>
+  </div>
+</div>
+
+<!-- ===== L5 三个独立写入者 ===== -->
+<div class="layer lc5" id="layer5">
+  <div class="layer-header">
+    <div class="layer-num">L5</div>
+    <div class="layer-title">
+      <h2>三个写入者（并列而非嵌套）</h2>
+      <div class="role">回答的问题：什么信息值得记住？由谁在什么时候写入？</div>
+      <div class="exists"><strong>存在理由：</strong>三个子系统触发时机不同、输出目标不同、生命周期不同，但共享 <code>runForkedAgent()</code> 基础设施和 <code>createAutoMemCanUseTool()</code> 权限沙箱。它们是同一层的三个并列实现，不是一个系统的三个阶段。</div>
+    </div>
+    <div class="layer-tag" style="color:var(--l5); border-color:rgba(244,114,182,0.3);">SessionMemory/ &middot; extractMemories/ &middot; autoDream/</div>
+  </div>
+
+  <div class="layer-grid" style="grid-template-columns:1fr 1fr 1fr;">
+    <div class="panel">
+      <h4>L5a 会话记忆</h4>
+      <ul>
+        <li><strong>触发</strong>：postSamplingHook</li>
+        <li><strong>条件</strong>：token &ge;<span class="v">10K</span> (初始) + 增量 <span class="v">5K</span> + 工具调用 <span class="v">3</span></li>
+        <li><strong>执行者</strong>：forkedAgent</li>
+        <li><strong>权限</strong>：仅 Edit 单个文件</li>
+        <li><strong>输出</strong>：session-memory/MEMORY.md</li>
+        <li><strong>生命</strong>：会话级</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>L5b 持久记忆</h4>
+      <ul>
+        <li><strong>触发</strong>：handleStopHooks</li>
+        <li><strong>条件</strong>：轮次结束 + 无工具调用</li>
+        <li><strong>执行者</strong>：forkedAgent</li>
+        <li><strong>权限</strong>：Read/Grep/Glob + 只读 Bash + Edit/Write 限 memory/</li>
+        <li><strong>输出</strong>：projects/&lt;path&gt;/memory/*.md</li>
+        <li><strong>生命</strong>：永久</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>L5c 记忆合并</h4>
+      <ul>
+        <li><strong>触发</strong>：后台（非钩子）</li>
+        <li><strong>条件</strong>：时间 &ge;<span class="v">24h</span> + 会话 &ge;<span class="v">5</span> + 锁可用</li>
+        <li><strong>执行者</strong>：forkedAgent</li>
+        <li><strong>权限</strong>：同 L5b</li>
+        <li><strong>输出</strong>：更新已有 memory/*.md</li>
+        <li><strong>生命</strong>：跨会话</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <h4>三者共享的基础设施</h4>
+    <ul>
+      <li><code>runForkedAgent()</code> &mdash; 创建隔离子代理，共享父级 prompt 缓存</li>
+      <li><code>createAutoMemCanUseTool()</code> &mdash; 权限沙箱（autoDream 直接复用 extractMemories 的导出）</li>
+      <li>queryClass 标记 &mdash; 防止子代理触发自动压缩（<code>session_memory</code> / <code>extract_memories</code>）</li>
+      <li>互斥逻辑 &mdash; 主代理写入时跳过 L5b；L5b 运行中暂存后续请求</li>
+    </ul>
+  </div>
+
+  <div class="principle">
+    <div class="lb">设计原理</div>
+    <p><strong>三个独立写入者，不是一个管线的三个阶段。</strong>前一版的错误是暗示它们是串行管线。实际上：Session Memory 在每次 API 响应后触发，Auto Memory 在轮次结束时触发，Auto Dream 在跨会话空闲时触发。它们时间尺度不同（秒级 / 分钟级 / 天级），互不等待，互不依赖（除了 L5c 复用了 L5b 的权限沙箱函数）。</p>
+  </div>
+</div>
+
+<!-- ===== L6 上下文桥接 ===== -->
+<div class="layer lc6" id="layer6">
+  <div class="layer-header">
+    <div class="layer-num">L6</div>
+    <div class="layer-title">
+      <h2>上下文桥接</h2>
+      <div class="role">回答的问题：记忆系统如何与上下文压缩系统交互？</div>
+      <div class="exists"><strong>存在理由：</strong>sessionMemoryCompact.ts 同时 import 了 SessionMemory/ 的状态和 compact/ 的数据结构，是唯一横跨记忆系统和上下文管理的模块。它不属于记忆系统（不写入记忆），也不完全属于压缩系统（依赖记忆内容），而是两个系统的桥梁。</div>
+    </div>
+    <div class="layer-tag" style="color:var(--l6); border-color:rgba(251,191,36,0.3);">sessionMemoryCompact.ts &middot; postCompactCleanup.ts</div>
+  </div>
+
+  <div class="layer-grid">
+    <div class="panel">
+      <h4>SM Compact（记忆 &rarr; 压缩）</h4>
+      <ul>
+        <li>读取 L5a 的会话记忆内容作为摘要</li>
+        <li>零 API 调用 &mdash; 不需要 LLM 生成摘要</li>
+        <li>保留 <span class="v">10K-40K</span> token 的近期消息</li>
+        <li>最少 <span class="v">5</span> 条文本消息</li>
+        <li><code>adjustIndexToPreserveAPIInvariants()</code> 保护配对</li>
+        <li>优先于传统压缩（成本为零）</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>Post-Compact Cleanup（压缩 &rarr; 记忆）</h4>
+      <ul>
+        <li>重置 <code>lastSummarizedMessageId</code></li>
+        <li>清空 memoryFiles 缓存（重新加载 CLAUDE.md）</li>
+        <li>清空 systemPromptSections（重建系统提示词）</li>
+        <li>通过 sessionStartHook 恢复 CLAUDE.md 附件</li>
+        <li>保留技能内容（跨压缩存活需要）</li>
+        <li>仅主线程压缩重置共享状态</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="principle">
+    <div class="lb">设计原理</div>
+    <p><strong>桥接层是两个独立系统的唯一耦合点。</strong>记忆系统 (L1-L5) 和上下文压缩系统 (compact/) 是两个独立关注点。L6 是它们之间的"胶水"：SM Compact 把记忆的产出喂给压缩器，Post-Compact Cleanup 在压缩后重新初始化记忆加载。没有 L6，两个系统可以完全独立运行 &mdash; 但记忆就无法帮助压缩降成本，压缩也不会恢复记忆。L6 的存在让"会话记忆写了什么"直接变成"压缩的摘要是什么"，节省一次 API 调用。</p>
+  </div>
+</div>
+
+<!-- ===== 横切关注点 ===== -->
+<div class="cross">
+  <h3>横切关注点（不是层）</h3>
+  <p>以下内容渗透在多层中，不构成独立的架构层：</p>
+  <ul>
+    <li><strong>特性开关</strong> &mdash; <code>getFeatureValue_CACHED_MAY_BE_STALE()</code> 散布在 L4 / L5a / L5b / L5c / L6 的入口处。它不是"管理其他层"的顶层，而是每个模块自己的 if 判断。</li>
+    <li><strong>环境变量覆盖</strong> &mdash; <code>CLAUDE_CODE_DISABLE_AUTO_MEMORY</code> 等在各模块的初始化函数中检查。</li>
+    <li><strong>熔断器</strong> &mdash; 仅存在于 autoCompact (L6) 中，不是全局机制。</li>
+    <li><strong>权限沙箱</strong> &mdash; <code>createAutoMemCanUseTool()</code> 在 L5b 中定义，被 L5b 和 L5c 共享，本质是 L5 的内部基础设施。</li>
+    <li><strong>钩子调度</strong> &mdash; postSamplingHook (触发 L5a) 和 handleStopHooks (触发 L5b) 是 query.ts 的职责，不是记忆系统自己的层。</li>
+  </ul>
+  <p>前一版的错误是把这些横切关注点强行塞成"层"，暗示它们有独立的模块和接口。实际上它们没有。</p>
+</div>
+
+<!-- ===== 数据流图 ===== -->
+<div class="dep-section">
+  <h2>修订后的跨层数据流</h2>
+  <div class="dep-diagram">用户输入 (query.ts)
+   |
+   +------> [L4] <code>startRelevantMemoryPrefetch()</code>  &lt;非阻塞异步&gt;
+   |              |
+   |         [L3] <code>scanMemoryFiles()</code>
+   |              |
+   |         [L1] 读取文件系统 (paths.ts 确定目录)
+   |              |
+   |         [L2] 解析 frontmatter (memoryTypes.ts 验证)
+   |              |
+   |         [L4] 调 Sonnet 3.5 选 Top-5  &lt;可能跳过&gt;
+   |              |
+   |         [L4] 注入为 attachment (4KB/文件, 5 个/轮)
+   |
+   v
+API 调用 (Claude) &lt;-- 注入的记忆在上下文中
+   |
+   +------> [L6] 上下文使用率 > 93%?
+   |              |
+   |         YES: SM Compact &larr; 读取 [L5a] 的会话记忆
+   |              |
+   |         或: Legacy Compact (1 次 API 调用)
+   |              |
+   |         Post-Compact: 重置记忆缓存, 恢复 CLAUDE.md
+   |
+   +------> [L5a] postSamplingHook
+   |              |
+   |         token增量 &ge; 5K 且 (工具调用 &ge; 3 或 无工具调用)?
+   |              |
+   |         YES: forkedAgent &rarr; [L2] 按 12 分区模板写入
+   |                              &rarr; [L1] session-memory/MEMORY.md
+   |
+   v
+轮次结束 (无工具调用)
+   |
+   +------> [L5b] handleStopHooks
+   |              |
+   |         [L3] <code>formatMemoryManifest()</code> 注入提示词
+   |              |
+   |         forkedAgent &rarr; [L2] 按 4 类型写入
+   |                        &rarr; [L1] projects/&lt;path&gt;/memory/*.md
+   |
+   +------> [L5c] 24h + 5 会话?  &lt;独立后台&gt;
+                   |
+              YES: 合并去重 &rarr; [L1] 更新已有 .md</div>
+</div>
+
+<!-- ===== 总结 ===== -->
+<div class="layer" style="border-top:3px solid #6c8aff; margin-top:48px;">
+  <div class="layer-header">
+    <div class="layer-num" style="background:rgba(108,138,255,0.12); color:var(--l3);">&#9733;</div>
+    <div class="layer-title">
+      <h2>为什么是 6 层而不是 8 层</h2>
+    </div>
+  </div>
+
+  <div class="layer-grid">
+    <div class="panel">
+      <h4>合并的 2 层</h4>
+      <ul>
+        <li><strong>旧 L1+L3 &rarr; 新 L1</strong><br>存储和安全在代码中不可分割（paths.ts 同时做两件事）</li>
+        <li style="margin-top:12px;"><strong>旧 L7 (调度) 删除</strong><br>钩子调度是 query.ts 的职责，不是记忆系统的层</li>
+        <li style="margin-top:12px;"><strong>旧 L8 (控制) 降级为横切</strong><br>特性开关是散布的 if 判断，没有独立的模块和接口</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>新增的结构性认知</h4>
+      <ul>
+        <li><strong>L5 明确为并列三写入者</strong><br>不再暗示串行管线，每个有独立触发和输出</li>
+        <li style="margin-top:12px;"><strong>L6 明确为桥接层</strong><br>前一版的"生命周期层"混入了压缩逻辑，但压缩不属于记忆系统</li>
+        <li style="margin-top:12px;"><strong>读写分离由 L3 (扫描) 保证</strong><br>L4 (读) 和 L5 (写) 没有直接依赖，通过 L3 共享清单</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="principle">
+    <div class="lb">层次验证标准</div>
+    <p>每一层的存在都通过了以下测试：<br>
+    <strong>1. 依赖证据</strong> &mdash; 至少被两个不同的上层模块 import<br>
+    <strong>2. 变更隔离</strong> &mdash; 修改本层不需要同时修改上层<br>
+    <strong>3. 替换可行</strong> &mdash; 理论上可以用不同的实现替换（如 L1 从文件换成 SQLite，L4 从 Sonnet 换成向量检索）<br>
+    <strong>4. 关注点单一</strong> &mdash; 用一句话能说清楚本层回答什么问题</p>
+  </div>
+</div>
+
+</div>
+
+<footer>
+  Claude Code 内存管理架构 &mdash; 6 层原理视图（修订版） &mdash; 2026-04-10
+</footer>
+
+</body>
+</html>

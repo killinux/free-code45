@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 记忆系统横向对比：Claude Code vs Mem0 vs Letta vs Zep</title>
+<style>
+  :root {
+    --bg:#0f1117; --card:#1a1d2e; --border:#2a2d3e;
+    --text:#e0e0e0; --text-dim:#8b8fa3;
+    --accent:#6c8aff; --accent2:#a78bfa; --accent3:#34d399;
+    --accent4:#fbbf24; --accent5:#f472b6; --danger:#ef4444;
+    --code-bg:#141620;
+    /* 系统专属色 */
+    --cc:#6c8aff;     /* Claude Code 蓝 */
+    --mem0:#34d399;   /* Mem0 绿 */
+    --letta:#fbbf24;  /* Letta 黄 */
+    --zep:#f472b6;    /* Zep 粉 */
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',-apple-system,'PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--text); line-height:1.7; }
+  .hero { background:linear-gradient(135deg,#0a1628 0%,#0f1117 50%,#1a1040 100%); padding:72px 40px; text-align:center; border-bottom:1px solid var(--border); position:relative; overflow:hidden; }
+  .hero::before { content:''; position:absolute; inset:-50%; width:200%; height:200%; background:radial-gradient(circle at 20% 30%,rgba(108,138,255,0.06) 0%,transparent 50%),radial-gradient(circle at 50% 50%,rgba(52,211,153,0.05) 0%,transparent 50%),radial-gradient(circle at 80% 70%,rgba(244,114,182,0.05) 0%,transparent 50%); animation:drift 25s ease-in-out infinite; }
+  @keyframes drift { 0%,100%{transform:translate(0)} 50%{transform:translate(-1%,1%)} }
+  .hero h1 { font-size:2.4em; font-weight:700; position:relative; margin-bottom:14px; background:linear-gradient(135deg,#6c8aff,#34d399,#fbbf24,#f472b6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  .hero p { color:var(--text-dim); font-size:1.1em; position:relative; max-width:760px; margin:0 auto; }
+  .container { max-width:1280px; margin:0 auto; padding:40px 24px; }
+  section { margin-bottom:64px; }
+  .section-header { display:flex; align-items:center; gap:14px; margin-bottom:24px; padding-bottom:14px; border-bottom:1px solid var(--border); }
+  .section-icon { width:42px; height:42px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:1.3em; flex-shrink:0; }
+  .section-header h2 { font-size:1.5em; font-weight:600; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:24px; margin-bottom:16px; }
+  .card h3 { font-size:1.1em; font-weight:600; margin-bottom:12px; color:var(--accent2); }
+  .card h4 { font-size:0.95em; font-weight:600; margin:16px 0 8px; color:var(--accent3); }
+  .card p,.card li { color:var(--text-dim); font-size:0.93em; line-height:1.8; }
+  .card ul,.card ol { padding-left:20px; margin:8px 0; }
+  .card li { margin-bottom:4px; }
+  .grid-2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; }
+  .grid-4 { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0; font-size:0.88em; }
+  th,td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { color:var(--accent); font-weight:600; font-size:0.82em; text-transform:uppercase; letter-spacing:0.5px; }
+  td { color:var(--text-dim); }
+  tr:last-child td { border-bottom:none; }
+  code { background:var(--code-bg); padding:2px 7px; border-radius:4px; font-family:'JetBrains Mono',monospace; font-size:0.88em; color:var(--accent3); }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:18px; overflow-x:auto; margin:12px 0; font-family:'JetBrains Mono',monospace; font-size:0.82em; line-height:1.7; color:var(--text-dim); }
+  .tag { display:inline-block; padding:2px 10px; border-radius:20px; font-size:0.75em; font-weight:600; margin-right:4px; margin-bottom:4px; }
+  .tag-cc { background:rgba(108,138,255,0.15); color:var(--cc); }
+  .tag-mem0 { background:rgba(52,211,153,0.15); color:var(--mem0); }
+  .tag-letta { background:rgba(251,191,36,0.15); color:var(--letta); }
+  .tag-zep { background:rgba(244,114,182,0.15); color:var(--zep); }
+  .tag-green { background:rgba(52,211,153,0.15); color:var(--accent3); }
+  .tag-yellow { background:rgba(251,191,36,0.15); color:var(--accent4); }
+  .tag-red { background:rgba(239,68,68,0.15); color:var(--danger); }
+  .highlight-box { border-left:3px solid var(--accent); background:rgba(108,138,255,0.05); padding:16px 20px; border-radius:0 8px 8px 0; margin:16px 0; }
+  .highlight-box.insight { border-left-color:var(--accent3); background:rgba(52,211,153,0.05); }
+  .highlight-box.warn { border-left-color:var(--accent4); background:rgba(251,191,36,0.05); }
+  /* 系统卡片专色 */
+  .sys-card { border-top:3px solid; padding:24px; }
+  .sys-card.cc { border-top-color:var(--cc); }
+  .sys-card.mem0 { border-top-color:var(--mem0); }
+  .sys-card.letta { border-top-color:var(--letta); }
+  .sys-card.zep { border-top-color:var(--zep); }
+  .sys-card h3 { font-size:1.3em; margin-bottom:6px; }
+  .sys-card .sub { color:var(--text-dim); font-size:0.85em; margin-bottom:14px; }
+  /* 矩阵表格 */
+  .matrix th:first-child, .matrix td:first-child { color:var(--text); font-weight:500; }
+  .matrix th { background:rgba(108,138,255,0.05); }
+  .matrix td { font-size:0.85em; }
+  .col-cc { background:rgba(108,138,255,0.04); }
+  .col-mem0 { background:rgba(52,211,153,0.04); }
+  .col-letta { background:rgba(251,191,36,0.04); }
+  .col-zep { background:rgba(244,114,182,0.04); }
+  footer { text-align:center; padding:40px; color:var(--text-dim); font-size:0.85em; border-top:1px solid var(--border); margin-top:40px; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>AI 记忆系统横向对比</h1>
+  <p>
+    <span class="tag tag-cc">Claude Code</span>
+    <span class="tag tag-mem0">Mem0</span>
+    <span class="tag tag-letta">Letta / MemGPT</span>
+    <span class="tag tag-zep">Zep (Graphiti)</span>
+    <br>四种主流 AI 记忆架构的设计哲学与技术对比
+  </p>
+</div>
+
+<div class="container">
+
+<!-- ===== 引言 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(108,138,255,0.15);">&#9881;</div>
+    <h2>四个系统的核心定位</h2>
+  </div>
+  <div class="grid-4">
+    <div class="card sys-card cc">
+      <h3 style="color:var(--cc);">Claude Code</h3>
+      <div class="sub">CLI 工具内置记忆</div>
+      <p><strong>哲学：</strong>文件优先，LLM 驱动</p>
+      <p><strong>核心：</strong>Markdown 文件 + 渐进式压缩 + 子代理提取</p>
+      <p><strong>适用：</strong>单开发者长对话，IDE 集成</p>
+    </div>
+    <div class="card sys-card mem0">
+      <h3 style="color:var(--mem0);">Mem0</h3>
+      <div class="sub">通用记忆层</div>
+      <p><strong>哲学：</strong>LLM-as-Memory-Manager（写时管理）</p>
+      <p><strong>核心：</strong>向量库 + ADD/UPDATE/DELETE/NOOP 决策</p>
+      <p><strong>适用：</strong>用户偏好快速演化的聊天机器人</p>
+    </div>
+    <div class="card sys-card letta">
+      <h3 style="color:var(--letta);">Letta / MemGPT</h3>
+      <div class="sub">LLM 操作系统</div>
+      <p><strong>哲学：</strong>OS 启发的虚拟内存分页</p>
+      <p><strong>核心：</strong>分层记忆 + 代理自编辑工具</p>
+      <p><strong>适用：</strong>需要持久身份的长寿命单代理</p>
+    </div>
+    <div class="card sys-card zep">
+      <h3 style="color:var(--zep);">Zep (Graphiti)</h3>
+      <div class="sub">时序知识图谱</div>
+      <p><strong>哲学：</strong>双时态图谱推理</p>
+      <p><strong>核心：</strong>Neo4j + 双时间轴 + 边失效</p>
+      <p><strong>适用：</strong>企业级时序事实推理</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 核心对比矩阵 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(167,139,250,0.15);">&#9776;</div>
+    <h2>核心对比矩阵</h2>
+  </div>
+  <div class="card" style="overflow-x:auto;">
+    <table class="matrix">
+      <tr>
+        <th>维度</th>
+        <th class="col-cc">Claude Code</th>
+        <th class="col-mem0">Mem0</th>
+        <th class="col-letta">Letta / MemGPT</th>
+        <th class="col-zep">Zep / Graphiti</th>
+      </tr>
+      <tr>
+        <td><strong>范式</strong></td>
+        <td class="col-cc">文件 + LLM 检索</td>
+        <td class="col-mem0">写时 LLM 决策</td>
+        <td class="col-letta">虚拟内存 + 自编辑</td>
+        <td class="col-zep">时序知识图谱</td>
+      </tr>
+      <tr>
+        <td><strong>存储后端</strong></td>
+        <td class="col-cc">Markdown 文件系统</td>
+        <td class="col-mem0">Qdrant/Chroma/Pinecone + Neo4j(graph)</td>
+        <td class="col-letta">PostgreSQL + pgvector</td>
+        <td class="col-zep">Neo4j / FalkorDB / Kuzu</td>
+      </tr>
+      <tr>
+        <td><strong>记忆单元</strong></td>
+        <td class="col-cc">.md 文件 + frontmatter</td>
+        <td class="col-mem0">自然语言事实 + 嵌入</td>
+        <td class="col-letta">可编辑文本块 + FIFO 消息 + 向量文档</td>
+        <td class="col-zep">Episode + 实体节点 + 双时态边</td>
+      </tr>
+      <tr>
+        <td><strong>记忆类型</strong></td>
+        <td class="col-cc">user / feedback / project / reference</td>
+        <td class="col-mem0">单一类型（事实陈述）</td>
+        <td class="col-letta">core / recall / archival 三层</td>
+        <td class="col-zep">episode / entity / edge / community</td>
+      </tr>
+      <tr>
+        <td><strong>检索算法</strong></td>
+        <td class="col-cc">LLM 判断（Sonnet 选 Top-5）</td>
+        <td class="col-mem0">向量 Top-K（+ 图遍历）</td>
+        <td class="col-letta">分页归档搜索 + 对话搜索 + 始终在 core</td>
+        <td class="col-zep">余弦 + BM25 + BFS 三方融合 + 重排</td>
+      </tr>
+      <tr>
+        <td><strong>写入决策</strong></td>
+        <td class="col-cc">子代理提取，4 类型分类</td>
+        <td class="col-mem0">LLM 选 ADD/UPDATE/DELETE/NOOP</td>
+        <td class="col-letta">代理自调用 core_memory_append / replace</td>
+        <td class="col-zep">实体去重 + 时态矛盾时边失效</td>
+      </tr>
+      <tr>
+        <td><strong>冲突处理</strong></td>
+        <td class="col-cc">Auto Dream 后台合并</td>
+        <td class="col-mem0">写时 LLM 检测矛盾 &rarr; DELETE 或 UPDATE</td>
+        <td class="col-letta">代理自行编辑覆盖</td>
+        <td class="col-zep">永不删除，标记 t_invalid 失效</td>
+      </tr>
+      <tr>
+        <td><strong>时态模型</strong></td>
+        <td class="col-cc">mtime + &gt;1 天新鲜度警告</td>
+        <td class="col-mem0">时间戳元数据</td>
+        <td class="col-letta">recall memory 支持日期搜索</td>
+        <td class="col-zep">完整双时态：(t_valid, t_invalid) &times; (t'_created, t'_expired)</td>
+      </tr>
+      <tr>
+        <td><strong>压力管理</strong></td>
+        <td class="col-cc">5 层渐进压缩 + 自动压缩</td>
+        <td class="col-mem0">隐式（Top-K 上限）</td>
+        <td class="col-letta">75% 警告 + 100% 队列冲刷 + 递归摘要</td>
+        <td class="col-zep">无需（图谱无限 + 常数时间检索）</td>
+      </tr>
+      <tr>
+        <td><strong>多用户</strong></td>
+        <td class="col-cc">团队记忆 + 路径安全</td>
+        <td class="col-mem0">user_id / agent_id / run_id</td>
+        <td class="col-letta">代理隔离 + 共享记忆块</td>
+        <td class="col-zep">group_id 子图分区</td>
+      </tr>
+      <tr>
+        <td><strong>Token 效率</strong></td>
+        <td class="col-cc">未公开基准</td>
+        <td class="col-mem0">~7K vs 26K 全上下文，节省 90%</td>
+        <td class="col-letta">通过分页支持无限有效上下文</td>
+        <td class="col-zep">115K &rarr; 1.6K 压缩</td>
+      </tr>
+      <tr>
+        <td><strong>基准成绩</strong></td>
+        <td class="col-cc">未公开</td>
+        <td class="col-mem0">LOCOMO 比 OpenAI Memory 高 26%</td>
+        <td class="col-letta">DMR 93.4%</td>
+        <td class="col-zep">DMR 94.8%, LongMemEval +18.5%</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- ===== 1. Mem0 详细分析 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(52,211,153,0.15);">&#9670;</div>
+    <h2>1. Mem0 &mdash; LLM-as-Memory-Manager</h2>
+  </div>
+
+  <div class="card">
+    <h3>核心创新：写时 LLM 决策</h3>
+    <p>Mem0 的最独特设计是<strong>把 LLM 当作记忆管理器</strong>。每次新事实写入时，系统检索 Top-10 语义相似的现有记忆，然后让 LLM 通过工具调用决定执行哪个操作：</p>
+    <table>
+      <tr><th>操作</th><th>触发条件</th><th>行为</th></tr>
+      <tr><td><code>ADD</code></td><td>无语义等价的现有记忆</td><td>生成新 ID，插入新记忆</td></tr>
+      <tr><td><code>UPDATE</code></td><td>现有记忆可补充信息</td><td>复用原 ID，附带 old_memory 历史</td></tr>
+      <tr><td><code>DELETE</code></td><td>检测到与现有记忆矛盾</td><td>删除被矛盾的记忆</td></tr>
+      <tr><td><code>NOOP</code></td><td>事实重复或无关</td><td>不变</td></tr>
+    </table>
+    <div class="highlight-box">
+      <strong>关键洞察：</strong>冲突解决和去重发生在<strong>写入时</strong>，通过 LLM 推理完成；而不是在读取时。这意味着记忆库始终保持"清洁"状态，检索时不需要再次去重。
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>两种变体</h3>
+    <div class="grid-2">
+      <div>
+        <h4>Mem0 (基础版)</h4>
+        <ul>
+          <li>纯向量库（Qdrant 默认）</li>
+          <li>每条记忆是自然语言事实 + 嵌入向量</li>
+          <li>检索：稠密向量 Top-K</li>
+          <li>简单、快速、生产就绪</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Mem0^g (图谱版)</h4>
+        <ul>
+          <li>Neo4j 知识图谱</li>
+          <li>两阶段提取：实体抽取 + 关系生成</li>
+          <li>有向标记图：节点（人/地点）+ 边（lives_in/prefers）</li>
+          <li>双重检索：实体导航 + 三元组嵌入匹配</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>LOCOMO 基准成绩</h3>
+    <table>
+      <tr><th>问题类型</th><th>Mem0</th><th>Mem0^g</th></tr>
+      <tr><td>单跳 (Single-Hop)</td><td>67.13</td><td>65.71</td></tr>
+      <tr><td>多跳 (Multi-Hop)</td><td>51.15</td><td>47.19</td></tr>
+      <tr><td>开放域 (Open-Domain)</td><td>72.93</td><td>75.71</td></tr>
+      <tr><td>时序推理 (Temporal)</td><td>55.51</td><td>58.13</td></tr>
+    </table>
+    <p style="margin-top:8px;">
+      &bull; 比 OpenAI Memory 准确率高 <strong>26%</strong><br>
+      &bull; p95 延迟降低 <strong>91%</strong>（1.44s vs 17.12s 全上下文）<br>
+      &bull; 每次对话约 <strong>7K token</strong>（vs 全上下文 26K，vs Zep 基线 600K）<br>
+      &bull; 时序推理改进 <strong>50%</strong>
+    </p>
+  </div>
+</section>
+
+<!-- ===== 2. Letta 详细分析 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(251,191,36,0.15);">&#9881;</div>
+    <h2>2. Letta / MemGPT &mdash; LLM 操作系统</h2>
+  </div>
+
+  <div class="card">
+    <h3>核心隐喻：LLM 即操作系统</h3>
+    <p>MemGPT 论文提出"LLM 作为操作系统"的范式：</p>
+    <ul>
+      <li><strong>LLM 是 CPU</strong>，处理上下文中的指令</li>
+      <li><strong>上下文窗口是 RAM</strong>，容量有限但访问快</li>
+      <li><strong>外部存储是磁盘</strong>，容量无限但需要"换页"加载</li>
+      <li><strong>代理本身是进程管理器</strong>，通过工具调用主动管理自己的内存</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>两层记忆架构</h3>
+    <h4>一层：主上下文（Main Context / "RAM"）</h4>
+    <ol>
+      <li><strong>系统指令</strong> &mdash; 只读，包含代理逻辑和工具定义</li>
+      <li><strong>工作上下文 / 核心记忆（Core Memory）</strong>
+        <ul>
+          <li>可编辑的文本块（通常包含 <code>persona</code> 和 <code>human</code>）</li>
+          <li>始终在提示词中可见</li>
+          <li>每块约 2KB，由代理自己维护</li>
+        </ul>
+      </li>
+      <li><strong>FIFO 消息队列</strong> &mdash; 最近对话历史，满时被淘汰或摘要</li>
+    </ol>
+    <h4>二层：外部上下文（External Context / "磁盘"）</h4>
+    <ol>
+      <li><strong>Recall Memory</strong> &mdash; 完整对话日志，可按关键词/时间搜索</li>
+      <li><strong>Archival Memory</strong> &mdash; 无界向量索引知识库，长期事实存储</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3>代理自编辑工具</h3>
+    <p>代理通过以下函数调用<strong>主动编辑自己的记忆</strong>：</p>
+    <table>
+      <tr><th>工具</th><th>作用</th></tr>
+      <tr><td><code>core_memory_append(section, content)</code></td><td>向核心块追加内容</td></tr>
+      <tr><td><code>core_memory_replace(section, old, new)</code></td><td>编辑核心块</td></tr>
+      <tr><td><code>archival_memory_insert(content)</code></td><td>写入向量库</td></tr>
+      <tr><td><code>archival_memory_search(query, page)</code></td><td>语义搜索（支持分页）</td></tr>
+      <tr><td><code>conversation_search(query)</code></td><td>搜索 recall memory</td></tr>
+    </table>
+    <p><strong>request_heartbeat=true</strong> 标志使工具调用返回后立即重新调用 LLM，实现链式记忆操作（搜索 &rarr; 读取 &rarr; 追加到核心）。</p>
+  </div>
+
+  <div class="card">
+    <h3>内存压力的优雅处理</h3>
+    <h4>75% 警告</h4>
+    <p>当上下文使用率达到 ~75% 时，系统注入一条系统消息警告代理"上下文正在填满"，提示代理将重要细节持久化到归档记忆。这是<strong>自主压缩</strong> &mdash; 由代理决定保留什么。</p>
+    <h4>100% 冲刷</h4>
+    <p>当上下文溢出时，<strong>队列管理器</strong>淘汰最旧的 FIFO 消息：</p>
+    <ul>
+      <li>被淘汰的内容被<strong>递归摘要化</strong></li>
+      <li>摘要插入到工作上下文</li>
+      <li>完整消息仍可通过 recall memory 访问</li>
+    </ul>
+    <div class="highlight-box insight">
+      <strong>关键洞察：</strong>这把"上下文溢出"从硬错误变成了<strong>优雅的分页事件</strong>。代理可以无限期运行，因为永远不会"忘记"任何东西 &mdash; 只是某些东西被分页到了"磁盘"。
+    </div>
+  </div>
+</section>
+
+<!-- ===== 3. Zep 详细分析 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(244,114,182,0.15);">&#9733;</div>
+    <h2>3. Zep / Graphiti &mdash; 双时态知识图谱</h2>
+  </div>
+
+  <div class="card">
+    <h3>三层知识图谱架构</h3>
+    <p>G = (N, E, &phi;)，包含三个子图：</p>
+    <ol>
+      <li><strong>Episode 子图（G_e）</strong> &mdash; 原始 episode 节点（消息、文本、JSON）。无损数据存储，每个派生事实都可追溯到其 episode（出处追溯）</li>
+      <li><strong>语义实体子图（G_s）</strong> &mdash; 提取的实体节点 + 语义边（关系）。实体通过嵌入余弦相似度 + 全文匹配去重</li>
+      <li><strong>社区子图（G_c）</strong> &mdash; 强连通实体的高层聚类，通过 LLM 生成摘要，使用 Leiden 风格的标签传播社区检测构建</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3>双时态模型 &mdash; 决定性特征</h3>
+    <p>每条边携带 <strong>4 个时间戳</strong>，跨越两条时间轴：</p>
+    <pre>时间轴 T (事件时间)：
+  t_valid       — 事实在现实世界中开始有效的时间
+  t_invalid     — 事实在现实世界中失效的时间
+
+时间轴 T' (事务时间)：
+  t'_created    — 系统学到该事实的时间
+  t'_expired    — 系统将其标记为失效的时间</pre>
+    <p>这是真正的双时态数据库模型（借鉴自时态 DB 文献）。它支持以下查询：</p>
+    <ul>
+      <li>"我们在 3 月 5 日<strong>认为</strong> X 是什么？" &mdash; 使用 t' 时间轴</li>
+      <li>"3 月 5 日<strong>实际</strong>是什么？" &mdash; 使用 t 时间轴</li>
+      <li>"2024 年用户偏好的工具是什么，现在又是什么？" &mdash; 跨时间对比</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>边失效算法（永不删除）</h3>
+    <p>当摄入新边时，系统通过 LLM 推理与语义相似的现有边比较。检测到<strong>时间重叠的矛盾</strong>时：</p>
+    <ol>
+      <li>不删除被矛盾的旧边</li>
+      <li>在旧边上设置 <code>t_invalid</code> = 新边的 <code>t_valid</code></li>
+      <li>新边正常插入，建立替代关系</li>
+    </ol>
+    <div class="highlight-box insight">
+      <strong>设计意图：</strong>事实<strong>永远不会被删除</strong>，只会被失效。这保留了完整历史，支持任意时间点的查询。Mem0 用 DELETE 覆盖矛盾，Zep 用失效保留历史 &mdash; 这是两种截然不同的哲学。
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>三方融合检索</h3>
+    <p>检索管线：<strong>&phi;(Search) &rarr; &rho;(Reranker) &rarr; &chi;(Constructor)</strong></p>
+    <ol>
+      <li><strong>余弦语义搜索</strong> &mdash; 节点/边嵌入向量</li>
+      <li><strong>BM25 全文检索</strong> &mdash; 通过 Lucene（Neo4j）进行关键词匹配</li>
+      <li><strong>BFS 图遍历</strong> &mdash; 在 n 跳邻域内广度优先搜索</li>
+    </ol>
+    <p>重排器融合三方信号；构造器组装最终上下文块。检索延迟 <strong>&lt; 200ms</strong>，与图规模无关。</p>
+  </div>
+
+  <div class="card">
+    <h3>基准成绩</h3>
+    <ul>
+      <li><strong>DMR (Deep Memory Retrieval)</strong>：94.8%（GPT-4-Turbo），超越 MemGPT 的 93.4%</li>
+      <li><strong>LongMemEval</strong>：使用 GPT-4o 提升 18.5%</li>
+      <li><strong>延迟</strong>：~2.58s vs 基线 28.9s（降低 90%）</li>
+      <li><strong>上下文压缩</strong>：在企业级聊天语料上从 115K token 压缩到 1.6K token</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 关键架构对比 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(108,138,255,0.15);">&#9889;</div>
+    <h2>4. 关键架构对比维度</h2>
+  </div>
+
+  <div class="card">
+    <h3>"智能"位于何处</h3>
+    <table>
+      <tr><th>系统</th><th>智能位置</th><th>含义</th></tr>
+      <tr>
+        <td><span class="tag tag-cc">Claude Code</span></td>
+        <td>读取时（检索阶段）</td>
+        <td>LLM 在每次查询时判断哪些记忆相关</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-mem0">Mem0</span></td>
+        <td>写入时（更新决策）</td>
+        <td>LLM 在每次写入时决定 ADD/UPDATE/DELETE/NOOP</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-letta">Letta</span></td>
+        <td>代理本身（自编辑）</td>
+        <td>代理通过工具调用主动管理记忆</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-zep">Zep</span></td>
+        <td>摄入管线（提取阶段）</td>
+        <td>实体提取 + 边失效都在数据进入图谱时完成</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>处理矛盾的不同哲学</h3>
+    <div class="grid-2">
+      <div>
+        <h4 style="color:var(--cc);">Claude Code &mdash; 后台合并</h4>
+        <p>Auto Dream 在 24h + 5 会话后运行，合并去重。矛盾在合并阶段解决。</p>
+      </div>
+      <div>
+        <h4 style="color:var(--mem0);">Mem0 &mdash; 写时覆盖</h4>
+        <p>"最新真理获胜"。LLM 检测矛盾后直接 DELETE 旧记忆。简单粗暴。</p>
+      </div>
+      <div>
+        <h4 style="color:var(--letta);">Letta &mdash; 代理决定</h4>
+        <p>代理自己 <code>core_memory_replace</code>。质量取决于代理的编辑纪律。</p>
+      </div>
+      <div>
+        <h4 style="color:var(--zep);">Zep &mdash; 失效保留</h4>
+        <p>永不删除，标记 t_invalid。完整历史可追溯，支持时间旅行查询。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>扩展策略</h3>
+    <table>
+      <tr><th>系统</th><th>扩展机制</th><th>瓶颈</th></tr>
+      <tr>
+        <td><span class="tag tag-cc">Claude Code</span></td>
+        <td>渐进式压缩（5 层）+ 文件数硬上限 200</td>
+        <td>200 文件硬上限，无向量索引</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-mem0">Mem0</span></td>
+        <td>向量库 Top-K 截断</td>
+        <td>多跳推理弱（51.15）</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-letta">Letta</span></td>
+        <td>OS 风格分页 + 递归摘要</td>
+        <td>依赖代理编辑能力</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-zep">Zep</span></td>
+        <td>常数时间图检索</td>
+        <td>摄入成本高（LLM 密集提取）</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- ===== Claude Code 的位置 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(167,139,250,0.15);">&#9670;</div>
+    <h2>5. Claude Code 在四者中的定位</h2>
+  </div>
+
+  <div class="card">
+    <h3>Claude Code 的独特之处</h3>
+    <ul>
+      <li><strong>唯一一个文件优先的方案</strong> &mdash; 其他三个都是数据库后端</li>
+      <li><strong>唯一支持 Git 版本控制的方案</strong> &mdash; 记忆变更可追溯回滚</li>
+      <li><strong>唯一与 IDE/CLI 深度集成的方案</strong> &mdash; CLAUDE.md 与记忆统一</li>
+      <li><strong>唯一受生物学启发的合并机制</strong> &mdash; Auto Dream 模拟睡眠记忆整理</li>
+      <li><strong>最复杂的渐进式压缩</strong> &mdash; 5 层（微压缩 / SM 压缩 / 自动压缩 / 折叠 / Snip）</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Claude Code 的弱点（与其他三者对比）</h3>
+    <table>
+      <tr><th>弱点</th><th>对比对象</th><th>差距</th></tr>
+      <tr>
+        <td>检索可扩展性差</td>
+        <td>vs Mem0 / Zep</td>
+        <td>200 文件硬上限 vs 百万级向量/图</td>
+      </tr>
+      <tr>
+        <td>无时态推理</td>
+        <td>vs Zep</td>
+        <td>仅有 mtime + 1 天警告 vs 双时态模型</td>
+      </tr>
+      <tr>
+        <td>无矛盾检测</td>
+        <td>vs Mem0 / Zep</td>
+        <td>需要 Auto Dream 后台合并 vs 写时即时检测</td>
+      </tr>
+      <tr>
+        <td>代理无主动编辑权</td>
+        <td>vs Letta</td>
+        <td>子代理被动提取 vs 主代理自由读写</td>
+      </tr>
+      <tr>
+        <td>无知识图谱</td>
+        <td>vs Mem0^g / Zep</td>
+        <td>记忆扁平化 vs 关系网络</td>
+      </tr>
+      <tr>
+        <td>无公开基准</td>
+        <td>vs 全部</td>
+        <td>无法量化对比</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- ===== 跨系统启发 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(52,211,153,0.15);">&#9733;</div>
+    <h2>6. 跨系统综合启发</h2>
+  </div>
+
+  <div class="card">
+    <h3>从 Mem0 借鉴</h3>
+    <div class="highlight-box insight">
+      <strong>1. 写时矛盾检测</strong><br>
+      Claude Code 当前依赖 Auto Dream 在 24h 后才合并矛盾。可以借鉴 Mem0 的 ADD/UPDATE/DELETE/NOOP 模式，在子代理提取阶段即时检测矛盾。例如：当提取出"用户偏好 TypeScript"时，检索是否已有"用户偏好 JavaScript"，如有，让 LLM 判断是补充还是替换。
+    </div>
+    <div class="highlight-box insight">
+      <strong>2. 历史表追踪</strong><br>
+      Mem0 用单独的 history 表记录所有更新，可审计。Claude Code 已经有 Git 版本控制，但可以增加结构化的 <code>_history.md</code> 文件记录每次记忆变更的原因。
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>从 Letta 借鉴</h3>
+    <div class="highlight-box insight">
+      <strong>3. 代理自编辑权</strong><br>
+      Letta 让主代理直接管理自己的记忆（<code>core_memory_append</code> 等工具）。Claude Code 的子代理是被动的"记忆员"，主代理无法主动整理记忆。可以给主代理增加 <code>memory_edit</code> 工具，允许它在对话中主动维护记忆，而不依赖后台子代理。
+    </div>
+    <div class="highlight-box insight">
+      <strong>4. 75% 警告机制</strong><br>
+      Letta 在上下文使用率达 75% 时主动提示代理"该持久化重要信息了"。Claude Code 在 ~93% 才触发自动压缩，错失了让代理自主整理的机会。可以增加 75% 软警告 &mdash; 给主代理一个机会用 <code>memory_edit</code> 主动归档关键信息。
+    </div>
+    <div class="highlight-box insight">
+      <strong>5. Heartbeat 链式调用</strong><br>
+      Letta 的 <code>request_heartbeat=true</code> 让记忆操作可以串成链（搜索 &rarr; 读取 &rarr; 写入）。Claude Code 的子代理虽然有最多 5 轮，但缺乏这种显式的链式语义。
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>从 Zep 借鉴</h3>
+    <div class="highlight-box insight">
+      <strong>6. 双时态模型</strong><br>
+      这是 Zep 最有价值的设计。Claude Code 当前只有 mtime（事务时间），没有事件时间。例如："2024 年项目用 React"和"2026 年项目用 Vue"应该都保留，而不是覆盖。可以在 frontmatter 增加：
+      <pre style="margin-top:8px;">---
+type: project
+valid_from: 2026-01-01
+valid_until: null  # 仍然有效
+created_at: 2026-01-15
+---</pre>
+    </div>
+    <div class="highlight-box insight">
+      <strong>7. 永不删除 + 失效标记</strong><br>
+      当用户的偏好/项目状态变化时，不删除旧记忆，而是标记 <code>valid_until</code>。这样可以回答"用户去年偏好什么"、"这个项目以前用什么技术栈"等历史查询。
+    </div>
+    <div class="highlight-box insight">
+      <strong>8. 三方融合检索</strong><br>
+      Zep 的 余弦 + BM25 + BFS 三方融合是检索的"瑞士军刀"。Claude Code 可以增加 BM25 全文检索作为 LLM 选择的预筛选层，把候选从 200 缩到 ~30。Auto Memory 目录加索引文件即可，无需引入向量数据库。
+    </div>
+    <div class="highlight-box insight">
+      <strong>9. 出处追溯（Episode 子图）</strong><br>
+      Zep 的每个事实都可追溯到原始 episode。Claude Code 的提取记忆没有"来源"信息。可以在 frontmatter 增加 <code>source_session: &lt;session-id&gt;</code>，帮助用户验证记忆是否准确。
+    </div>
+  </div>
+</section>
+
+<!-- ===== 可落地的改进路径 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(251,191,36,0.15);">&#9881;</div>
+    <h2>7. Claude Code 可落地的改进路径</h2>
+  </div>
+
+  <div class="card">
+    <h3>按投入产出比排序的 10 个改进</h3>
+    <table>
+      <tr><th>#</th><th>改进项</th><th>来源</th><th>实现难度</th><th>价值</th></tr>
+      <tr>
+        <td>1</td>
+        <td>frontmatter 增加 <code>valid_until</code> 字段，实现自动失效</td>
+        <td>Zep 双时态</td>
+        <td><span class="tag tag-green">极低</span></td>
+        <td>解决陈旧记忆堆积</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>frontmatter 增加 <code>source_session</code> 出处追溯</td>
+        <td>Zep Episode</td>
+        <td><span class="tag tag-green">极低</span></td>
+        <td>用户可验证记忆来源</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>主代理增加 <code>memory_edit</code> 工具</td>
+        <td>Letta 自编辑</td>
+        <td><span class="tag tag-green">低</span></td>
+        <td>代理可主动整理记忆</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>75% 上下文软警告 + 主动归档提示</td>
+        <td>Letta 压力管理</td>
+        <td><span class="tag tag-green">低</span></td>
+        <td>降低自动压缩频率</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>提取时检测矛盾 (ADD/UPDATE/DELETE)</td>
+        <td>Mem0 写时决策</td>
+        <td><span class="tag tag-yellow">中</span></td>
+        <td>消除重复和矛盾</td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td>SQLite FTS5 索引（BM25 预筛选）</td>
+        <td>Zep 三方融合</td>
+        <td><span class="tag tag-yellow">中</span></td>
+        <td>突破 200 文件上限</td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td>记忆变更历史文件 <code>_history.md</code></td>
+        <td>Mem0 history 表</td>
+        <td><span class="tag tag-green">低</span></td>
+        <td>变更可审计</td>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td>Heartbeat 风格的链式记忆操作</td>
+        <td>Letta heartbeat</td>
+        <td><span class="tag tag-yellow">中</span></td>
+        <td>记忆操作更高效</td>
+      </tr>
+      <tr>
+        <td>9</td>
+        <td>frontmatter 增加 <code>related</code> 关联字段</td>
+        <td>Memori / Mem0^g</td>
+        <td><span class="tag tag-green">低</span></td>
+        <td>检索时关联展开</td>
+      </tr>
+      <tr>
+        <td>10</td>
+        <td>引入 sentence-transformers 嵌入</td>
+        <td>Mem0 / Zep</td>
+        <td><span class="tag tag-red">高</span></td>
+        <td>语义检索质量提升</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="highlight-box insight">
+    <strong>建议优先级：</strong><br>
+    <strong>第一阶段</strong>（改 frontmatter，零基础设施）：1, 2, 9, 7<br>
+    <strong>第二阶段</strong>（改提取/编辑流程）：3, 4, 5, 8<br>
+    <strong>第三阶段</strong>（引入索引）：6（SQLite FTS5）, 10（嵌入模型）
+  </div>
+</section>
+
+<!-- ===== 总结 ===== -->
+<section>
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(244,114,182,0.15);">&#9733;</div>
+    <h2>8. 总结：四种哲学，四种理想场景</h2>
+  </div>
+
+  <div class="card">
+    <table>
+      <tr><th>场景</th><th>最佳选择</th><th>原因</th></tr>
+      <tr>
+        <td>本地 CLI / IDE 集成开发</td>
+        <td><span class="tag tag-cc">Claude Code</span></td>
+        <td>文件可读可编辑，与代码库一起 Git 管理</td>
+      </tr>
+      <tr>
+        <td>消费级聊天机器人 / 个性化助手</td>
+        <td><span class="tag tag-mem0">Mem0</span></td>
+        <td>快速演化的用户偏好，写时去重保持记忆库清洁</td>
+      </tr>
+      <tr>
+        <td>持久身份的长寿命单代理</td>
+        <td><span class="tag tag-letta">Letta</span></td>
+        <td>核心记忆 + 分页 + 自编辑，代理可"持续工作"数月</td>
+      </tr>
+      <tr>
+        <td>企业级时序事实推理</td>
+        <td><span class="tag tag-zep">Zep</span></td>
+        <td>双时态模型支持"何时知道何事"的复杂查询</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="highlight-box">
+    <strong>核心洞察：</strong>没有"最好"的记忆系统，只有"最适合"的记忆系统。<br><br>
+    Claude Code 选择文件优先是因为它是开发工具，<strong>用户希望能直接看到和编辑记忆</strong>。如果它改成数据库后端，会失去这个核心优势。但它可以从其他系统借鉴<strong>不破坏文件优先性</strong>的设计，比如双时态字段、写时矛盾检测、SQLite FTS5 索引等。
+    <br><br>
+    四种系统代表了 AI 记忆研究的四个前沿：
+    <ul style="margin-top:8px;">
+      <li><strong>Claude Code</strong>：开发者工效学（"记忆应该像代码一样可管理"）</li>
+      <li><strong>Mem0</strong>：写时智能（"清洁的记忆库胜过聪明的检索"）</li>
+      <li><strong>Letta</strong>：自主性（"代理应该管理自己的记忆"）</li>
+      <li><strong>Zep</strong>：时态推理（"事实有时间，知识在演化"）</li>
+    </ul>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  AI 记忆系统横向对比 &mdash; Claude Code &middot; Mem0 &middot; Letta/MemGPT &middot; Zep/Graphiti
+</footer>
+
+</body>
+</html>

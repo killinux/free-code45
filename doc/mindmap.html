@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code 系统脑图</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',-apple-system,'PingFang SC','Microsoft YaHei',sans-serif; background:#0a0c14; color:#e0e0e0; overflow-x:auto; }
+
+  .page-title {
+    text-align:center; padding:32px 20px 16px;
+    font-size:1.8em; font-weight:700;
+    background:linear-gradient(135deg,#6c8aff,#a78bfa,#34d399);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  }
+  .page-sub { text-align:center; color:#8b8fa3; font-size:0.95em; margin-bottom:32px; }
+
+  /* Tab bar */
+  .tab-bar { display:flex; justify-content:center; gap:8px; margin-bottom:24px; flex-wrap:wrap; padding:0 16px; }
+  .tab-btn {
+    padding:8px 20px; border-radius:20px; border:1px solid #2a2d3e;
+    background:#1a1d2e; color:#8b8fa3; cursor:pointer; font-size:0.88em; transition:all 0.2s;
+  }
+  .tab-btn:hover { border-color:#6c8aff; color:#e0e0e0; }
+  .tab-btn.active { background:rgba(108,138,255,0.15); border-color:#6c8aff; color:#6c8aff; font-weight:600; }
+
+  .map-wrap { display:none; padding:24px; max-width:1400px; margin:0 auto; }
+  .map-wrap.active { display:block; }
+
+  /* ====== Tree Mindmap ====== */
+  .tree { padding-left:0; }
+  .tree, .tree ul { list-style:none; }
+  .tree ul { padding-left:32px; margin:0; }
+
+  /* Root node */
+  .tree > li > .nd {
+    display:inline-block;
+    background:linear-gradient(135deg,#6c8aff,#a78bfa);
+    color:#fff; font-weight:700; font-size:1.05em;
+    padding:12px 28px; border-radius:12px; margin-bottom:12px;
+  }
+
+  /* Branch node */
+  .nd {
+    display:inline-block;
+    padding:7px 16px; border-radius:8px;
+    font-size:0.92em; font-weight:600;
+    margin:4px 0; cursor:pointer; user-select:none;
+    transition: filter 0.2s, box-shadow 0.2s;
+    position:relative;
+  }
+  .nd:hover { filter:brightness(1.2); box-shadow:0 0 12px rgba(255,255,255,0.05); }
+  .nd .arrow { font-size:0.7em; margin-left:6px; opacity:0.5; display:inline-block; transition:transform 0.2s; }
+  .collapsed > .nd .arrow { transform:rotate(-90deg); }
+
+  /* Leaf node */
+  .lf {
+    padding:3px 0 3px 8px;
+    font-size:0.88em; color:#8b8fa3; line-height:1.7;
+    border-left:1px dashed rgba(255,255,255,0.08);
+    margin-left:8px;
+  }
+  .lf strong { color:#e0e0e0; font-weight:500; }
+  .lf code {
+    background:#141620; padding:1px 6px; border-radius:3px;
+    font-family:'JetBrains Mono',monospace; font-size:0.9em; color:#34d399;
+  }
+  .lf .v { color:#fbbf24; font-weight:500; }
+  .lf .d { color:#555; }
+
+  /* Tree lines */
+  .tree ul { border-left:2px solid #1e2235; }
+  .tree li { padding:2px 0 2px 16px; position:relative; }
+  .tree li::before {
+    content:''; position:absolute; left:0; top:16px;
+    width:16px; border-top:2px solid #1e2235;
+  }
+  .tree > li { padding-left:0; border:none; }
+  .tree > li::before { display:none; }
+
+  /* Collapse */
+  .tree .sub { overflow:hidden; }
+  .tree .collapsed > .sub { display:none; }
+
+  /* Color themes */
+  .c1 > .nd { background:rgba(52,211,153,0.15); color:#34d399; }
+  .c2 > .nd { background:rgba(244,114,182,0.15); color:#f472b6; }
+  .c3 > .nd { background:rgba(108,138,255,0.15); color:#6c8aff; }
+  .c4 > .nd { background:rgba(167,139,250,0.15); color:#a78bfa; }
+  .c5 > .nd { background:rgba(251,191,36,0.15); color:#fbbf24; }
+  .c6 > .nd { background:rgba(34,211,238,0.15); color:#22d3ee; }
+  .c7 > .nd { background:rgba(251,146,60,0.15); color:#fb923c; }
+  .c8 > .nd { background:rgba(239,68,68,0.15); color:#ef4444; }
+
+  footer { text-align:center; padding:40px 20px; color:#555; font-size:0.82em; }
+</style>
+</head>
+<body>
+
+<div class="page-title">Claude Code 系统脑图</div>
+<div class="page-sub">点击分支可展开/折叠 &mdash; 共 5 张脑图覆盖完整系统架构</div>
+
+<div class="tab-bar">
+  <div class="tab-btn active" onclick="showMap('m1',this)">总体架构</div>
+  <div class="tab-btn" onclick="showMap('m2',this)">内存管理</div>
+  <div class="tab-btn" onclick="showMap('m3',this)">上下文管理</div>
+  <div class="tab-btn" onclick="showMap('m4',this)">工具与扩展</div>
+  <div class="tab-btn" onclick="showMap('m5',this)">查询引擎</div>
+</div>
+
+<!-- ========== 脑图 1: 总体架构 ========== -->
+<div id="m1" class="map-wrap active">
+<ul class="tree">
+  <li>
+    <div class="nd" onclick="tog(this)">Claude Code 总体架构 <span class="arrow">&#9660;</span></div>
+    <ul class="sub">
+      <li class="c1">
+        <div class="nd" onclick="tog(this)">入口层 (Entrypoints) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>cli.tsx</strong> &mdash; CLI 启动入口，处理 --version / --dump-system-prompt</div></li>
+          <li><div class="lf"><strong>sdk/</strong> &mdash; Agent SDK 入口，编程式调用</div></li>
+          <li><div class="lf"><strong>mcp.ts</strong> &mdash; MCP Server 模式入口</div></li>
+          <li><div class="lf"><strong>init.ts</strong> &mdash; 初始化（认证、配置、特性开关）</div></li>
+        </ul>
+      </li>
+      <li class="c2">
+        <div class="nd" onclick="tog(this)">UI 层 (Screens + Ink) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>REPL.tsx</strong> &mdash; 主交互界面 <span class="d">(896KB)</span>，React/Ink 终端 UI</div></li>
+          <li><div class="lf"><strong>Doctor.tsx</strong> &mdash; 诊断排查界面</div></li>
+          <li><div class="lf"><strong>Ink 渲染引擎</strong> &mdash; ~40 文件，终端 React reconciler</div></li>
+          <li><div class="lf"><strong>Components/</strong> &mdash; 权限对话框、Diff 渲染、任务面板</div></li>
+          <li><div class="lf"><strong>Hooks/</strong> &mdash; 100+ 自定义 React 钩子</div></li>
+        </ul>
+      </li>
+      <li class="c3">
+        <div class="nd" onclick="tog(this)">核心层 (Engine + State) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>QueryEngine.ts</strong> &mdash; 核心编排器 <span class="d">(150KB+)</span></div></li>
+          <li><div class="lf"><strong>query.ts</strong> &mdash; API 循环 + 8 阶段上下文管理管线</div></li>
+          <li><div class="lf"><strong>AppStateStore</strong> &mdash; Zustand 全局状态</div></li>
+          <li><div class="lf"><strong>bootstrap/state.ts</strong> &mdash; 全局初始化单例</div></li>
+        </ul>
+      </li>
+      <li class="c4">
+        <div class="nd" onclick="tog(this)">能力层 (Tools + Commands + Skills) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>47 个工具</strong> &mdash; 文件操作 / 搜索 / Shell / 代理 / 任务 / 调度</div></li>
+          <li><div class="lf"><strong>89 个命令</strong> &mdash; Git / IDE / 配置 / 分析 / 高级功能</div></li>
+          <li><div class="lf"><strong>技能系统</strong> &mdash; 可加载外部技能，斜杠命令扩展</div></li>
+          <li><div class="lf"><strong>插件系统</strong> &mdash; 热重载，注入工具和命令</div></li>
+        </ul>
+      </li>
+      <li class="c5">
+        <div class="nd" onclick="tog(this)">服务层 (Services) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>api/</strong> &mdash; Claude API 客户端、重试、缓存中断检测</div></li>
+          <li><div class="lf"><strong>compact/</strong> &mdash; 微压缩 + 自动压缩 + SM 压缩</div></li>
+          <li><div class="lf"><strong>SessionMemory/</strong> &mdash; 会话记忆提取</div></li>
+          <li><div class="lf"><strong>extractMemories/</strong> &mdash; 持久记忆提取</div></li>
+          <li><div class="lf"><strong>autoDream/</strong> &mdash; 记忆合并（24h + 5 会话门控）</div></li>
+          <li><div class="lf"><strong>mcp/</strong> &mdash; MCP 服务器管理</div></li>
+          <li><div class="lf"><strong>oauth/</strong> &mdash; 认证服务</div></li>
+          <li><div class="lf"><strong>analytics/</strong> &mdash; GrowthBook 特性开关 + 事件日志</div></li>
+        </ul>
+      </li>
+      <li class="c6">
+        <div class="nd" onclick="tog(this)">基础层 (Utils + Constants) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>utils/</strong> &mdash; 292 个工具模块</div></li>
+          <li><div class="lf"><strong>constants/</strong> &mdash; 22 个常量文件</div></li>
+          <li><div class="lf"><strong>types/</strong> &mdash; 9 个核心类型文件</div></li>
+          <li><div class="lf"><strong>memdir/</strong> &mdash; 8 个记忆管理文件</div></li>
+        </ul>
+      </li>
+      <li class="c7">
+        <div class="nd" onclick="tog(this)">集成层 (Bridge + Remote + Tasks) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>bridge/</strong> &mdash; IDE 桥接 <span class="d">(30+ 文件, 540KB)</span></div></li>
+          <li><div class="lf"><strong>remote/</strong> &mdash; 远程会话管理</div></li>
+          <li><div class="lf"><strong>tasks/</strong> &mdash; 7 种任务类型</div></li>
+          <li><div class="lf"><strong>coordinator/</strong> &mdash; 多代理协调模式</div></li>
+          <li><div class="lf"><strong>voice/</strong> &mdash; 语音输入/输出</div></li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+</div>
+
+<!-- ========== 脑图 2: 内存管理 ========== -->
+<div id="m2" class="map-wrap">
+<ul class="tree">
+  <li>
+    <div class="nd" onclick="tog(this)">内存管理系统 <span class="arrow">&#9660;</span></div>
+    <ul class="sub">
+      <li class="c5">
+        <div class="nd" onclick="tog(this)">微压缩 (Micro Compact) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li class="c5">
+            <div class="nd" onclick="tog(this)">时间触发 <span class="arrow">&#9660;</span></div>
+            <ul class="sub">
+              <li><div class="lf">间隔 &ge; <span class="v">60 分钟</span>时触发（服务端缓存已过期）</div></li>
+              <li><div class="lf">直接修改消息，替换为 <code>[Old tool result content cleared]</code></div></li>
+              <li><div class="lf">保留最近 <span class="v">5</span> 个工具结果（最少 1 个）</div></li>
+            </ul>
+          </li>
+          <li class="c3">
+            <div class="nd" onclick="tog(this)">缓存编辑 (Cached MC) <span class="arrow">&#9660;</span></div>
+            <ul class="sub">
+              <li><div class="lf">工具结果数 &ge; <span class="v">12</span> 时触发</div></li>
+              <li><div class="lf">通过 <code>cache_edits</code> API 服务端删除，不修改本地</div></li>
+              <li><div class="lf">保留最近 <span class="v">3</span> 个结果</div></li>
+              <li><div class="lf">支持模型：<code>opus-4-6</code>, <code>sonnet-4-6</code></div></li>
+            </ul>
+          </li>
+          <li><div class="lf">可压缩工具：FileRead / Bash / Grep / Glob / WebSearch / WebFetch / FileEdit / FileWrite</div></li>
+        </ul>
+      </li>
+      <li class="c3">
+        <div class="nd" onclick="tog(this)">自动压缩 (Auto Compact) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf">触发阈值：有效窗口 - <span class="v">13K</span>（约 <span class="v">93%</span> 占用率）</div></li>
+          <li><div class="lf">阻塞限制：有效窗口 - <span class="v">3K</span>（约 <span class="v">98%</span>）</div></li>
+          <li><div class="lf">熔断器：连续 <span class="v">3</span> 次失败后停止重试</div></li>
+          <li class="c1">
+            <div class="nd" onclick="tog(this)">优先级 1: SM Compact（零 API） <span class="arrow">&#9660;</span></div>
+            <ul class="sub">
+              <li><div class="lf">使用已提取的会话笔记作为摘要</div></li>
+              <li><div class="lf">保留 <span class="v">10K-40K</span> token 的近期消息</div></li>
+              <li><div class="lf">最少 <span class="v">5</span> 条文本消息</div></li>
+              <li><div class="lf"><code>adjustIndexToPreserveAPIInvariants()</code> 保护配对</div></li>
+            </ul>
+          </li>
+          <li class="c3">
+            <div class="nd" onclick="tog(this)">优先级 2: 传统压缩（1 次 API） <span class="arrow">&#9660;</span></div>
+            <ul class="sub">
+              <li><div class="lf">发送完整对话给 LLM 生成 9 章节摘要</div></li>
+              <li><div class="lf">摘要最大输出 <span class="v">20K</span> token</div></li>
+              <li><div class="lf">压缩后恢复 CLAUDE.md + 技能（<span class="v">50K</span> token 预算）</div></li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+      <li class="c4">
+        <div class="nd" onclick="tog(this)">会话记忆 (Session Memory) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf">初始化阈值：<span class="v">10,000</span> token</div></li>
+          <li><div class="lf">更新增量阈值：<span class="v">5,000</span> token（必要条件）</div></li>
+          <li><div class="lf">工具调用阈值：<span class="v">3</span> 次</div></li>
+          <li><div class="lf">12 个分区，每分区 <span class="v">2K</span> token，总计 <span class="v">12K</span></div></li>
+          <li><div class="lf">通过 <code>runForkedAgent()</code> 分叉子代理执行</div></li>
+          <li><div class="lf">子代理仅允许 <code>FileEdit</code> 编辑指定记忆文件</div></li>
+          <li><div class="lf">存储：<code>~/.claude/session-memory/MEMORY.md</code></div></li>
+        </ul>
+      </li>
+      <li class="c2">
+        <div class="nd" onclick="tog(this)">持久记忆 (Auto Memory) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf">触发：每轮结束时（最后一条回复无工具调用）</div></li>
+          <li><div class="lf">节流：每 N 轮执行一次（默认 1）</div></li>
+          <li><div class="lf">最大轮次：<span class="v">5</span>（防止验证兔子洞）</div></li>
+          <li><div class="lf">互斥：主代理写入时跳过后台提取</div></li>
+          <li><div class="lf">重叠：暂存上下文，完成后执行一次尾随提取</div></li>
+          <li class="c2">
+            <div class="nd" onclick="tog(this)">权限沙箱 <span class="arrow">&#9660;</span></div>
+            <ul class="sub">
+              <li><div class="lf">Read / Grep / Glob &mdash; 不限制</div></li>
+              <li><div class="lf">Bash &mdash; 仅只读命令</div></li>
+              <li><div class="lf">Edit / Write &mdash; 仅 memory 目录</div></li>
+              <li><div class="lf">其他工具 &mdash; 全部拒绝</div></li>
+            </ul>
+          </li>
+          <li><div class="lf">4 种记忆类型：user / feedback / project / reference</div></li>
+          <li><div class="lf">两步保存：写文件 + 更新 MEMORY.md 索引</div></li>
+        </ul>
+      </li>
+      <li class="c7">
+        <div class="nd" onclick="tog(this)">记忆合并 (Auto Dream) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf">时间门控：&ge; <span class="v">24 小时</span></div></li>
+          <li><div class="lf">会话门控：&ge; <span class="v">5</span> 个新会话</div></li>
+          <li><div class="lf">锁机制：原子文件 mtime 更新</div></li>
+          <li><div class="lf">扫描节流：<span class="v">10 分钟</span></div></li>
+        </ul>
+      </li>
+      <li class="c1">
+        <div class="nd" onclick="tog(this)">记忆注入 (Injection) <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf">扫描 &rarr; 调 Sonnet 3.5 选出 &le;5 个相关文件</div></li>
+          <li><div class="lf">每文件 <span class="v">4KB</span>，每轮 <span class="v">~20KB</span>，会话 <span class="v">60KB</span></div></li>
+          <li><div class="lf">非阻塞预取（永不阻塞主轮次）</div></li>
+          <li><div class="lf">&gt;1 天的记忆附带新鲜度警告</div></li>
+          <li><div class="lf">压缩后重置累计计数器</div></li>
+        </ul>
+      </li>
+      <li class="c8">
+        <div class="nd" onclick="tog(this)">团队记忆安全 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf">路径遍历防护：null 字节 / URL 编码 / Unicode / 反斜杠</div></li>
+          <li><div class="lf">两阶段验证：字符串级 + 符号链接解析</div></li>
+          <li><div class="lf">前缀攻击防护：要求分隔符紧跟前缀</div></li>
+          <li><div class="lf">禁止保存：API 密钥、凭证等敏感数据</div></li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+</div>
+
+<!-- ========== 脑图 3: 上下文管理 ========== -->
+<div id="m3" class="map-wrap">
+<ul class="tree">
+  <li>
+    <div class="nd" onclick="tog(this)">上下文管理系统 <span class="arrow">&#9660;</span></div>
+    <ul class="sub">
+      <li class="c1">
+        <div class="nd" onclick="tog(this)">窗口配置 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf">默认窗口：<span class="v">200K</span>，1M 模型：<span class="v">1,000,000</span></div></li>
+          <li><div class="lf">Opus 4.6 输出：<span class="v">64K/128K</span></div></li>
+          <li><div class="lf">Sonnet 4.6 输出：<span class="v">32K/128K</span></div></li>
+          <li><div class="lf">槽位优化：初始 <span class="v">8K</span>，重试升级到 <span class="v">64K</span></div></li>
+          <li><div class="lf">环境变量覆盖：<code>CLAUDE_CODE_MAX_CONTEXT_TOKENS</code></div></li>
+        </ul>
+      </li>
+      <li class="c3">
+        <div class="nd" onclick="tog(this)">8 阶段处理管线 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>1. 边界提取</strong> &mdash; <code>getMessagesAfterCompactBoundary()</code></div></li>
+          <li><div class="lf"><strong>2. 预算截断</strong> &mdash; <code>applyToolResultBudget()</code></div></li>
+          <li><div class="lf"><strong>3. Snip 裁剪</strong> &mdash; 删除旧的中间轮次</div></li>
+          <li><div class="lf"><strong>4. 微压缩</strong> &mdash; 清理工具结果（时间/缓存编辑）</div></li>
+          <li><div class="lf"><strong>5. 上下文折叠</strong> &mdash; 细粒度摘要化（实验性）</div></li>
+          <li><div class="lf"><strong>6. 自动压缩</strong> &mdash; SM 压缩或传统压缩</div></li>
+          <li><div class="lf"><strong>7. 阻塞检查</strong> &mdash; ~98% 时阻止输入</div></li>
+          <li><div class="lf"><strong>8. 组装请求</strong> &mdash; 规范化 + 拼接 + 缓存控制</div></li>
+        </ul>
+      </li>
+      <li class="c4">
+        <div class="nd" onclick="tog(this)">Prompt 缓存 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf">系统提示词分割：静态前缀（缓存） + 动态后缀</div></li>
+          <li><div class="lf">默认 TTL <span class="v">5 分钟</span>，实验性 <span class="v">1 小时</span></div></li>
+          <li><div class="lf">缓存中断检测：跟踪 15+ 状态参数</div></li>
+          <li><div class="lf">状态锁存：Beta / TTL / 努力等级 会话内不变</div></li>
+        </ul>
+      </li>
+      <li class="c5">
+        <div class="nd" onclick="tog(this)">消息规范化 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf">合并同源记录（同一 <code>message.id</code>）</div></li>
+          <li><div class="lf">剥离 advisor 块、caller 字段、tool_reference 块</div></li>
+          <li><div class="lf"><code>ensureToolResultPairing()</code> 确保工具配对</div></li>
+          <li><div class="lf">API 轮次分组：以 message.id 变化为界</div></li>
+        </ul>
+      </li>
+      <li class="c8">
+        <div class="nd" onclick="tog(this)">错误恢复 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><code>prompt_too_long</code> &rarr; 折叠恢复 / 响应式压缩</div></li>
+          <li><div class="lf"><code>max_output_tokens</code> &rarr; 升级到 <span class="v">64K</span> 重试</div></li>
+          <li><div class="lf">媒体错误 &rarr; 移除图片/PDF，文本替代后重试</div></li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+</div>
+
+<!-- ========== 脑图 4: 工具与扩展 ========== -->
+<div id="m4" class="map-wrap">
+<ul class="tree">
+  <li>
+    <div class="nd" onclick="tog(this)">工具与扩展系统 <span class="arrow">&#9660;</span></div>
+    <ul class="sub">
+      <li class="c3">
+        <div class="nd" onclick="tog(this)">47 个内置工具 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>文件操作</strong>：FileRead / FileEdit / FileWrite / NotebookEdit</div></li>
+          <li><div class="lf"><strong>搜索</strong>：Glob / Grep / ToolSearch / WebSearch</div></li>
+          <li><div class="lf"><strong>Shell</strong>：Bash / PowerShell / LSP / WebFetch</div></li>
+          <li><div class="lf"><strong>代理</strong>：Agent / Skill / AskUser / SendMessage</div></li>
+          <li><div class="lf"><strong>任务</strong>：TaskCreate / TaskGet / TaskList / TaskUpdate / TaskStop</div></li>
+          <li><div class="lf"><strong>调度</strong>：ScheduleCron / RemoteTrigger / Sleep</div></li>
+          <li><div class="lf"><strong>模式</strong>：PlanMode / Worktree / MCP / Config</div></li>
+        </ul>
+      </li>
+      <li class="c1">
+        <div class="nd" onclick="tog(this)">4 种扩展机制 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>MCP 服务器</strong> &mdash; 外部工具/资源，stdio/sse/http 传输</div></li>
+          <li><div class="lf"><strong>插件系统</strong> &mdash; 热重载，注入工具和命令</div></li>
+          <li><div class="lf"><strong>技能系统</strong> &mdash; 外部技能目录，斜杠命令扩展</div></li>
+          <li><div class="lf"><strong>用户钩子</strong> &mdash; settings.json hooks，Shell 命令</div></li>
+        </ul>
+      </li>
+      <li class="c4">
+        <div class="nd" onclick="tog(this)">权限系统 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>permissions.ts</strong> <span class="d">(52KB)</span> &mdash; 主权限逻辑</div></li>
+          <li><div class="lf"><strong>yoloClassifier.ts</strong> <span class="d">(52KB)</span> &mdash; 自动安全判定</div></li>
+          <li><div class="lf"><strong>filesystem.ts</strong> <span class="d">(62KB)</span> &mdash; 文件系统规则</div></li>
+          <li><div class="lf">流程：规则检查 &rarr; YOLO 分类器 &rarr; 允许/对话框</div></li>
+        </ul>
+      </li>
+      <li class="c5">
+        <div class="nd" onclick="tog(this)">89 个斜杠命令 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>Git/VCS</strong>：commit / branch / review / pr_comments</div></li>
+          <li><div class="lf"><strong>IDE</strong>：ide / desktop / mobile / bridge</div></li>
+          <li><div class="lf"><strong>配置</strong>：config / color / theme / hooks / permissions</div></li>
+          <li><div class="lf"><strong>分析</strong>：diff / cost / effort / doctor / insights</div></li>
+          <li><div class="lf"><strong>高级</strong>：agents / bughunter / security-review</div></li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+</div>
+
+<!-- ========== 脑图 5: 查询引擎 ========== -->
+<div id="m5" class="map-wrap">
+<ul class="tree">
+  <li>
+    <div class="nd" onclick="tog(this)">查询引擎 (QueryEngine + query.ts) <span class="arrow">&#9660;</span></div>
+    <ul class="sub">
+      <li class="c1">
+        <div class="nd" onclick="tog(this)">输入处理 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><code>processUserInput()</code> &mdash; 创建 UserMessage + 附件</div></li>
+          <li><div class="lf">附件类型：文件 / PDF / IDE 选区 / 记忆 / 任务提醒</div></li>
+          <li><div class="lf">记忆预取：非阻塞 <code>startRelevantMemoryPrefetch()</code></div></li>
+        </ul>
+      </li>
+      <li class="c3">
+        <div class="nd" onclick="tog(this)">上下文组装 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><code>appendSystemContext()</code> &mdash; 系统上下文拼接</div></li>
+          <li><div class="lf"><code>prependUserContext()</code> &mdash; CLAUDE.md + 记忆前置</div></li>
+          <li><div class="lf"><code>toolToAPISchema()</code> &mdash; 工具定义转 JSON Schema</div></li>
+          <li><div class="lf"><code>normalizeMessagesForAPI()</code> &mdash; 消息规范化</div></li>
+        </ul>
+      </li>
+      <li class="c4">
+        <div class="nd" onclick="tog(this)">API 调用 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><code>queryModelWithStreaming()</code> &mdash; 流式请求</div></li>
+          <li><div class="lf">缓存控制：ephemeral + 可选 TTL + scope</div></li>
+          <li><div class="lf">Thinking 配置：自适应思考 / 预算模式</div></li>
+          <li><div class="lf">任务预算：total + remaining 跟踪</div></li>
+        </ul>
+      </li>
+      <li class="c5">
+        <div class="nd" onclick="tog(this)">工具执行循环 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><code>StreamingToolExecutor</code> &mdash; 并行执行</div></li>
+          <li><div class="lf">权限检查 &rarr; 执行 &rarr; 结果注入 &rarr; 继续循环</div></li>
+          <li><div class="lf">单个 API 响应可包含多个 tool_use</div></li>
+        </ul>
+      </li>
+      <li class="c2">
+        <div class="nd" onclick="tog(this)">后处理钩子 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><strong>postSamplingHook</strong>：会话记忆提取</div></li>
+          <li><div class="lf"><strong>handleStopHooks</strong>：持久记忆 + 提示建议 + 置信度</div></li>
+          <li><div class="lf"><strong>归因追踪</strong>：Git commit 归因</div></li>
+          <li><div class="lf"><strong>缓存中断检测</strong>：<code>checkResponseForCacheBreak()</code></div></li>
+        </ul>
+      </li>
+      <li class="c7">
+        <div class="nd" onclick="tog(this)">分叉子代理 <span class="arrow">&#9660;</span></div>
+        <ul class="sub">
+          <li><div class="lf"><code>runForkedAgent()</code> &mdash; 共享 prompt 缓存的隔离代理</div></li>
+          <li><div class="lf">用途：会话记忆 / 持久记忆 / 压缩 / 摘要 / 建议</div></li>
+          <li><div class="lf">工具权限通过 <code>canUseTool</code> 函数限制</div></li>
+          <li><div class="lf">查询来源标记防止递归触发压缩</div></li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+</div>
+
+<footer>Claude Code 系统脑图 &mdash; 源码分析 &mdash; 2026-04-08</footer>
+
+<script>
+function showMap(id, btn) {
+  document.querySelectorAll('.map-wrap').forEach(function(el) { el.classList.remove('active'); });
+  document.querySelectorAll('.tab-btn').forEach(function(el) { el.classList.remove('active'); });
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+function tog(el) {
+  var li = el.parentElement;
+  var arrow = el.querySelector('.arrow');
+  if (li.classList.contains('collapsed')) {
+    li.classList.remove('collapsed');
+    if (arrow) arrow.innerHTML = '&#9660;';
+  } else {
+    li.classList.add('collapsed');
+    if (arrow) arrow.innerHTML = '&#9654;';
+  }
+}
+</script>
+</body>
+</html>
